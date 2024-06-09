@@ -181,14 +181,15 @@ PAPER_TEST
 
 ### 8. CAUTION
 
-- BEWARE : Using different build plates or double-sided build plates
--- Due to the physical layers on your build plate, there is often variance in the height of the PEI layer / textured PEI layer from one build plate to the next. These layers are non-conductive material which sit above the conductive steel. The eddy will ignore non-conductive material, so this physical difference will affect your build height. In this case, after all of your configuration on one plate (or side of a plate), you will have a reference plate for Z=0, which is now hard-stored in your printer.cfg file. To adjust the z height from one plate to the next, you will need to print and measure a skirt height to find out the variance in mm of your build plate surface. In my case there is a 0.2mm difference between my PEO surface and my textured PEI surface. Once you have that number, you can configure plate profiles in ORCA slicer, and detect the plate type in your start gcode in order to affect the z-offset accordingly : see Orca’s “working with multiple bed types” page here https://github.com/SoftFever/OrcaSlicer/wiki/bed-types#multiple-bed-types 
-- BEWARE : Never again will you use bed-mesh from mainsail UI
--- From now on you will use the EDDY_MESH macro we added above. If you are using adaptive mesh, be sure to add the parameters: METHOD=scan SCAN_MODE=rapid 
-- BEWARE : you cannot calibrate and save z height by using z-offset.
--- Once Z=0 is truly set… making changes to the z-offset and saving will have no effect. To change the Z-height you must use Probe_eddy_current_calibrate (see PAPER_TEST macro above).
--- You can still micro step during a print or in gcode, but z-offset changes won’t save. After the z-motors are disengaged, eddy uses frequency to discover z=0, not the z-offset.
-- BEWARE: UPDATING KLIPPER in the future….. because we’re using a patched version of Klipper your updates will need to happen like this, until the code is officially merged into klipper main branch:
+- **BEWARE : Using different build plates or double-sided build plates**
+    - Due to the physical layers on your build plate, there is often variance in the height of the PEI layer / textured PEI layer from one build plate to the next. These layers are non-conductive material which sit above the conductive steel. The eddy will ignore non-conductive material, so this physical difference will affect your build height. In this case, after all of your configuration on one plate (or side of a plate), you will have a reference plate for Z=0, which is now hard-stored in your printer.cfg file. To adjust the z height from one plate to the next, you will need to print and measure a skirt height to find out the variance in mm of your build plate surface. In my case there is a 0.2mm difference between my PEO surface and my textured PEI surface. Once you have that number, you can configure plate profiles in ORCA slicer, and detect the plate type in your start gcode in order to affect the z-offset accordingly : see Orca’s “working with multiple bed types” page here https://github.com/SoftFever/OrcaSlicer/wiki/bed-types#multiple-bed-types 
+- **BEWARE : Never again will you use bed-mesh from mainsail UI**
+    - From now on you will use the EDDY_MESH macro we added above. If you are using adaptive mesh, be sure to add the parameters: METHOD=scan SCAN_MODE=rapid 
+- **BEWARE : you cannot calibrate and save z height by using z-offset**
+    - Once Z=0 is truly set… making changes to the z-offset and saving will have no effect. To change the Z-height you must use Probe_eddy_current_calibrate (see PAPER_TEST macro above).
+    - You can still micro step during a print or in gcode, but z-offset changes won’t save. After the z-motors are disengaged, eddy uses frequency to discover z=0, not the z-offset.
+- **BEWARE: UPDATING KLIPPER in the future…**
+    - because we’re using a patched version of Klipper your updates will need to happen like this, until the code is officially merged into klipper main branch:
 ```
 git stash
 do mainsail update stuff
