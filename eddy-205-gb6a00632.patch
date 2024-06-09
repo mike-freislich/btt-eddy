@@ -1,0 +1,2566 @@
+diff --git a/docs/Bed_Mesh.md b/docs/Bed_Mesh.md
+index 1538f625..705827f3 100644
+--- a/docs/Bed_Mesh.md
++++ b/docs/Bed_Mesh.md
+@@ -421,12 +421,95 @@ have undesirable results when attempting print moves **outside** of the probed a
+ full bed mesh has a variance greater than 1 layer height, caution must be taken when using
+ adaptive bed meshes and attempting print moves outside of the meshed area.
+ 
++## Surface Scans
++
++Some probes, such as the [Eddy Current Probe](./Eddy_Probe.md), are capable of
++"scanning" the surface of the bed.  That is, these probes can sample a mesh
++without lifting the tool between samples.  To activate scanning mode, the
++`METHOD=scan` probe parameter should be passed in the `BED_MESH_CALIBRATE`
++gcode command.
++
++To accommodate these probes the following additional `probe_parameters` are
++available to `BED_MESH_CALIBRATE`:
++
++- `SCAN_MODE=[detailed | rapid]`:  Choses the scan mode.  The `detailed` mode
++  will pause and collect samples at each probe point.  The `rapid` mode will
++  travel on a continuous path with no pauses, collecting samples near each probe
++  point.
++- `SCAN_SPEED=[speed] `: The maximum X/Y travel velocity of the tool when
++  performing a scan.  The default is the value of the `speed` option in the
++  configuration.
++- `SAMPLE_TIME=[time]`:  The time, in seconds, the tool pauses for sample
++  collection in `detailed` scan mode.  The default is .1 seconds.
++- `SAMPLES_RESULT=[option]`: The type of averaging to perform on collected
++  samples.  Available options are:
++  - `standard`: All collected samples are averaged.
++  - `centered`: Samples are sorted by value.  The first and last quarters
++    are discarded and the remaining samples are averaged.
++  - `weighted`: Samples closer to the desired probe location are assigned
++    more weight in the average than samples farther from the location.
++
++### Scan Height
++
++The scan height is set by the `horizontal_move_z` option in `[bed_mesh]`.  In
++addition it can be supplied with the `BED_MESH_CALIBRATE` gcode command via the
++`HORIZONTAL_MOVE_Z` parameter.
++
++The scan height must be sufficiently low to avoid scanning errors.  Typically
++a height of 2mm (ie: `HORIZONTAL_MOVE_Z=2`) should work well, presuming that the
++probe is mounted correctly.
++
++It should be noted that if the probe is more than 4mm above the surface then the
++results will be invalid.  Thus, scanning is not possible on beds with severe
++surface deviation or beds with extreme tilt that hasn't been corrected.
++
++### Rapid (Continuous) Scanning
++
++When performing a `rapid` scan one should keep in mind that the results will
++have some amount of error.  This error should be low enough to be useful on
++large print areas with reasonably thick layer heights.  Some probes may be
++more prone to error than others.
++
++It is not recommended that rapid mode be used to scan a "dense" mesh.  Some of
++the error introduced during a rapid scan may be gaussian noise from the sensor,
++and a dense mesh will reflect this noise (ie: there will be peaks and valleys).
++
++Bed Mesh will attempt to optimize the travel path to provide the best possible
++result based on the the configuration.  This includes avoiding faulty regions
++when collecting samples and "overshooting" the mesh when changing direction.
++This overshoot improves sampling at the edges of a mesh, however it requires
++that the mesh be configured in a way that allows the tool to travel outside
++of the mesh.
++
++```
++[bed_mesh]
++speed: 120
++horizontal_move_z: 5
++mesh_min: 35, 6
++mesh_max: 240, 198
++probe_count: 5
++scan_overshoot: 8
++```
++
++- `scan_overshoot`
++  _Default Value: 0 (disabled)_\
++  The maximum amount of travel (in mm) available outside of the mesh.
++  For rectangular beds this applies to travel on the X axis, and for round beds
++  it applies to the entire radius.  The tool must be able to travel the amount
++  specified outside of the mesh.  This value is used to optimize the travel
++  path when performing a "rapid scan".  The minimum value that may be specified
++  is 1.  The default is no overshoot.
++
++If no scan overshoot is configured then travel path optimization will not
++be applied to changes in direction.
++
+ ## Bed Mesh Gcodes
+ 
+ ### Calibration
+ 
+-`BED_MESH_CALIBRATE PROFILE=<name> METHOD=[manual | automatic] [<probe_parameter>=<value>]
+- [<mesh_parameter>=<value>] [ADAPTIVE=[0|1] [ADAPTIVE_MARGIN=<value>]`\
++`BED_MESH_CALIBRATE PROFILE=<name> METHOD=[manual | automatic | scan] \
++[<probe_parameter>=<value>] [<mesh_parameter>=<value>] [ADAPTIVE=[0|1] \
++[ADAPTIVE_MARGIN=<value>]`\
+ _Default Profile:  default_\
+ _Default Method:  automatic if a probe is detected, otherwise manual_ \
+ _Default Adaptive: 0_ \
+@@ -436,8 +519,9 @@ Initiates the probing procedure for Bed Mesh Calibration.
+ 
+ The mesh will be saved into a profile specified by the `PROFILE` parameter,
+ or `default` if unspecified. If `METHOD=manual` is selected then manual probing
+-will occur.  When switching between automatic and manual probing the generated
+-mesh points will automatically be adjusted.
++will occur.  If `METHOD=scan` is supplied with a supported probe then surface
++scanning will occur. When switching between probing methods the generated probe
++points will automatically be adjusted.
+ 
+ It is possible to specify mesh parameters to modify the probed area.  The
+ following parameters are available:
+@@ -451,6 +535,7 @@ following parameters are available:
+   - `MESH_ORIGIN`
+   - `ROUND_PROBE_COUNT`
+ - All beds:
++  - `MESH_PPS`
+   - `ALGORITHM`
+   - `ADAPTIVE`
+   - `ADAPTIVE_MARGIN`
+@@ -557,3 +642,155 @@ is intended to compensate for a `gcode offset` when [mesh fade](#mesh-fade)
+ is enabled.  For example, if a secondary extruder is higher than the primary
+ and needs a negative gcode offset, ie: `SET_GCODE_OFFSET Z=-.2`, it can be
+ accounted for in `bed_mesh` with `BED_MESH_OFFSET ZFADE=.2`.
++
++### Dumping mesh data
++
++`BED_MESH_DUMP [FILENAME=<name>] [<mesh_parameter>=<value>]`
++
++Dumps the current mesh configuration and state in json format for
++[visualization and analysis](#visualization-and-analysis).  The
++`FILENAME` parameter is optional and should be a relative name, when
++not specified the file's name will be in the format of
++`klipper-bedmesh-{year}{month}{day}{hour}{minute}{second}.json`. The
++file will be saved in a location relative to the parent of
++klipper's configuration file, this is commonly at
++`~/printer_data/config` or the user's home directory.
++
++In addition, one may specify `mesh parameters` available to
++[BED_MESH_CALIBRATE](#calibration).  This will result in a dump
++containing a mesh configuration and probe points using the
++supplied parameters.  It is recommended to omit Mesh parameters
++unless it is desired to visualize the probe points and/or travel
++path before performing `BED_MESH_CALIBRATE`.
++
++## Visualization and analysis
++
++Most users will likely find that the visualizers included with
++applications such as Mainsail, Fluidd, and Octoprint are sufficient
++for basic analysis.  However, Klipper's `scripts` folder contains
++`graph-mesh.py` script that may be used to perform additional
++visualizations and more detailed analysis, particularly useful
++for debugging hardware or the results produced by `bed_mesh`:
++
++```
++usage: graph-mesh.py [-h] {list,plot,analyze} ...
++
++Graph Bed Mesh Data
++
++positional arguments:
++  {list,plot,analyze}
++    list               List available plot types
++    plot               Plot a specified type
++    analyze            Perform analysis on mesh data
++
++options:
++  -h, --help           show this help message and exit
++```
++
++### Pre-requisites
++
++Like most graphing tools provided by Klipper, `graph-mesh.py` requires
++the `matplotlib` and `numpy` python dependencies.  While all visualizations
++can be output to an `svg` file, most of the visualizations offered by
++`graph-mesh.py` are better viewed in live preview mode on a desktop class PC.
++For example, the 3D visualizations may be rotated and zoomed in preview
++mode, and the path visualizations can optionally be animated in preview
++mode.
++
++### Plotting Mesh data
++
++The `graph_mesh.py` tool can plot several types of visualizations.
++Available types can be shown by running `graph-mesh.py list`:
++
++```
++graph-mesh.py list
++points    Plot original generated points
++path      Plot probe travel path
++rapid     Plot rapid scan travel path
++probedz   Plot probed Z values
++meshz     Plot mesh Z values
++overlay   Plots the current probed mesh overlaid with a profile
++delta     Plots the delta between current probed mesh and a profile
++```
++
++In addition, several options are available when plotting visualizations:
++
++```
++usage: graph-mesh.py plot [-h] [-a] [-s] [-p PROFILE_NAME] [-o OUTPUT] <plot type> <input file>
++
++positional arguments:
++  <plot type>           Type of data to graph
++  <input file>          Path to file containing mesh dump
++
++options:
++  -h, --help            show this help message and exit
++  -a, --animate         Animate paths in live preview
++  -s, --scale-plot      Use axis limits reported by Klipper to scale plot X/Y
++  -p PROFILE_NAME, --profile-name PROFILE_NAME
++                        Optional name of a profile to plot for 'probedz'
++  -o OUTPUT, --output OUTPUT
++                        Output file path
++```
++
++Below is a description of each argument:
++
++- `plot type`: A required positional argument designating the type of
++  visualization to generate.  Must be one of the types output by the
++  `graph-mesh.py list` command.
++- `input file`: A required positional argument indicating the path
++  to a json file generated by [BED_MESH_DUMP](#dumping-mesh-data).
++- `-a`:  Optional animation for the `path` and `rapid` visualization types.
++  Animations only apply to a live preview.
++- `-s`:  Optionally scales a plot using the `axis_minimum` and `axis_maximum`
++  values reported by Klipper's `toolhead` object when the dump file was
++  generated.
++- `-p`: A profile name that may be specified when generating the
++  `probedz` 3D mesh visualization.  When generating an `overlay` or
++  `delta` visualization this argument must be provided.
++- `-o`: An optional file path indicating that the script should save the
++  visualization to this location rather than run in preview mode.  Images
++  are saved in `svg` format.
++
++### Bed Mesh Analysis
++
++The `graph-mesh.py` tool may also be used to perform an analysis on the
++data provided by [BED_MESH_DUMP](#dumping-mesh-data):
++
++```
++graph-mesh.py analyze /path/to/bed-mesh-dump.json
++```
++
++To begin, the analysis will perform various checks on the points and
++probe paths generated by `bed_mesh` at the time of the dump.  This
++includes the following:
++
++- The number of probe points generated, without any additions
++- The number of probe points generated including any points generated
++  as the result faulty regions and/or a configured zero reference position.
++- The number of probe points generated when performing a rapid scan.
++- The total number of moves generated for a rapid scan.
++- A validation that the probe points generated for a rapid scan are
++  identical to the probe points generated for a standard probing procedure.
++- A "backtracking" check for both the standard probe path and a rapid scan
++  path.  Backtracking can be defined as moving to the same position more than
++  once during the probing procedure.  Backtracking should never occur during a
++  standard probe.  Faulty regions *can* result in backtracking during a rapid
++  scan in an attempt to avoid entering a faulty region when approaching or
++  leaving a probe location, however should never occur otherwise.
++
++Next each probed mesh present in the dump will by analyzed, beginning with
++the mesh loaded at the time of the dump (if present) and followed by any
++saved profiles.  The following data is extracted:
++
++- Mesh shape (Min X,Y, Max X,Y Probe Count)
++- Mesh Z range, (Minimum Z, Maximum Z)
++- Mean Z value in the mesh
++- Standard Deviation of the Z values in the Mesh
++
++In addition to the above, a delta analysis is performed between meshes
++with the same shape, reporting the following:
++- The range of the delta between to meshes (Minimum and Maximum)
++- The mean delta
++- Standard Deviation of the delta
++- The absolute maximum difference
++- The absolute mean
+diff --git a/docs/Config_Reference.md b/docs/Config_Reference.md
+index 6b42fe48..ca576d72 100644
+--- a/docs/Config_Reference.md
++++ b/docs/Config_Reference.md
+@@ -998,6 +998,13 @@ Visual Examples:
+ #adaptive_margin:
+ #   An optional margin (in mm) to be added around the bed area used by
+ #   the defined print objects when generating an adaptive mesh.
++#scan_overshoot:
++#  The maximum amount of travel (in mm) available outside of the mesh.
++#  For rectangular beds this applies to travel on the X axis, and for round beds
++#  it applies to the entire radius.  The tool must be able to travel the amount
++#  specified outside of the mesh.  This value is used to optimize the travel
++#  path when performing a "rapid scan".  The minimum value that may be specified
++#  is 1.  The default is no overshoot.
+ ```
+ 
+ ### [bed_tilt]
+@@ -2394,6 +2401,41 @@ temperature sensors that are reported via the M105 command.
+ #   parameter.
+ ```
+ 
++### [temperature_probe]
++
++Reports probe coil temperature.  Includes optional thermal drift
++calibration for eddy current based probes.   A `[temperature_probe]`
++section may be linked to a `[probe_eddy_current]` by using the same
++postfix for both sections.
++
++```
++[temperature_probe my_probe]
++#sensor_type:
++#sensor_pin:
++#min_temp:
++#max_temp:
++#   Temperature sensor configuration.
++#   See the "extruder" section for the definition of the above
++#   parameters.
++#smooth_time:
++#   A time value (in seconds) over which temperature measurements will
++#   be smoothed to reduce the impact of measurement noise. The default
++#   is 2.0 seconds.
++#gcode_id:
++#   See the "heater_generic" section for the definition of this
++#   parameter.
++#speed:
++#   The travel speed [mm/s] for xy moves during calibration.  Default
++#   is the speed defined by the probe.
++#horizontal_move_z:
++#   The z distance [mm] from the bed at which xy moves will occur
++#   during calibration. Default is 2mm.
++#resting_z:
++#   The z distance [mm] from the bed at which the tool will rest
++#   to heat the probe coil during calibration.  Default is .4mm
++
++```
++
+ ## Temperature sensors
+ 
+ Klipper includes definitions for many types of temperature sensors.
+diff --git a/docs/Eddy_Probe.md b/docs/Eddy_Probe.md
+index 221c855b..a58ff580 100644
+--- a/docs/Eddy_Probe.md
++++ b/docs/Eddy_Probe.md
+@@ -54,3 +54,74 @@ result in changes in reported Z height. Changes in either the bed
+ surface temperature or sensor hardware temperature can skew the
+ results. It is important that calibration and probing is only done
+ when the printer is at a stable temperature.
++
++## Thermal Drift Calibration
++
++As with all inductive probes, eddy current probes are subject to
++significant thermal drift.  If the eddy probe has a temperature
++sensor on the coil it is possible to configure a `[temperature_probe]`
++to report coil temperature and enable software drift compensation. To
++link a temperature probe to an eddy current probe the
++`[temperature_probe]` section must share a name with the
++`[probe_eddy_current]` section.  For example:
++
++```
++[probe_eddy_current my_probe]
++# eddy probe configuration...
++
++[temperature_probe my_probe]
++# temperature probe configuration...
++```
++
++See the [configuration reference](Config_Reference.md#temperature_probe)
++for further details on how to configure a `temperature_probe`.
++
++Eddy probe manufacturers may offer a stock drift calibration that can be
++manually added to `drift_calibration` option of the `[probe_eddy_current]`
++section. If they do not, or if the calibration does not perform well on
++your system, the `temperature_probe` module offers an option to perform a
++rough manual calibration.  Once a temperature probe is configured, the
++following steps may be taken to perform thermal drift calibration:
++
++- The probe must be calibrated using `PROBE_EDDY_CURRENT_CALIBRATE`
++  when a `[temperature_probe]` is configured and linked.  This captures
++  the temperature during calibration which is necessary to perform
++  thermal drift compensation.
++- Make sure the nozzle is free of debris/filament.
++- The bed, nozzle, and probe should be as cool as possible to start.
++- Move the tool to the center of the bed.  Z should be 30mm+ above the bed.
++- Heat the nozzle to a temperature above the maximum safe bed temperature.
++  150-170C should be sufficient for most configurations.  The goal is
++  to avoid nozzle expansion during calibration.
++- When the nozzle temperature has settled, move the Z axis down to about 1mm
++  above the bed.
++- Start drift calibration.  If the probe's name is `my_probe` and the maximum
++  probe temperature we can achieve is 80C, the appropriate gcode command is
++  `PROBE_DRIFT_CALIBRATE PROBE=my_probe TARGET=80`
++- This will immediately request a manual probe.  Perform the manual probe
++  with the paper test and `ACCEPT`.  The calibration procedure will take
++  the first sample and park the probe in the heating position.
++- Turn on bed heat to the maximum safe level.
++- By default the calibration procedure will request a manual probe every
++  2C between samples until the `TARGET` is reached.  The temperature delta
++  between samples can be customized by setting the `STEP` parameter in
++  `PROBE_DRIFT_CALIBRATE`.
++- The following additional gcode commands are available during drift
++  calibration.
++  - `PROBE_DRIFT_NEXT` may be used to force a new sample before the step
++    delta has been reached.
++  - `PROBE_DRIFT_COMPLETE` may be used to complete calibration before the
++    `TARGET` has been reached.
++  - `ABORT` may be used to end calibration and discard results.
++- When calibration is finished use `SAVE_CONFIG` to store the drift
++  calibration.
++
++Prior to running `PROBE_DRIFT_CALIBRATE` the user should have a good idea
++of what maximum attainable temperature probe coil temperature is.  This
++should be used to set the `TARGET` parameter.  The goal is to calibrate
++the widest temperature range possible.  In addition, care should be used
++when customizing the `STEP` parameter.  A step value too high may result
++in too few sample, ending in a poor calibration result.
++
++As one may conclude, the calibration process outlined above is more challenging
++and time consuming than most other procedures.  It may require practice and several attempts to achieve an optimal calibration.
+diff --git a/docs/G-Codes.md b/docs/G-Codes.md
+index e55fba35..fd0baaea 100644
+--- a/docs/G-Codes.md
++++ b/docs/G-Codes.md
+@@ -208,6 +208,24 @@ adjustment after a tool change.  Note that a ZFADE offset does not apply
+ additional z-adjustment directly, it is used to correct the `fade`
+ calculation when a `gcode offset` has been applied to the Z axis.
+ 
++#### BED_MESH_DUMP
++`BED_MESH_DUMP [FILENAME=<name>] [<mesh_parameter>=<value>]`:
++Dumps the current mesh configuration and state in json format for
++[visualization and analysis](./Bed_Mesh.md#visualization-and-analysis).
++The `FILENAME` parameter is optional and should be a relative name, when
++not specified the file's name will be in the format of
++`klipper-bedmesh-{year}{month}{day}{hour}{minute}{second}.json`. The
++file will be saved in a location relative to the parent of
++klipper's configuration file, this is commonly at
++`~/printer_data/config` or the user's home directory.
++
++In addition, one may specify `mesh parameters` available to
++[BED_MESH_CALIBRATE](#bed_mesh_calibrate).  This will result in a dump
++containing a mesh configuration and probe points using the
++supplied parameters.   It is recommended to omit Mesh parameters
++unless it is desired to visualize the probe points and/or travel
++path before performing `BED_MESH_CALIBRATE`.
++
+ ### [bed_screws]
+ 
+ The following commands are available when the
+@@ -1415,3 +1433,34 @@ command will probe the points specified in the config and then make independent
+ adjustments to each Z stepper to compensate for tilt. See the PROBE command for
+ details on the optional probe parameters. The optional `HORIZONTAL_MOVE_Z`
+ value overrides the `horizontal_move_z` option specified in the config file.
++
++### [temperature_probe]
++
++The following commands are available when a
++[temperature_probe config section](Config_Reference.md#temperature_probe)
++is enabled.
++
++#### PROBE_DRIFT_CALIBRATE
++`PROBE_DRIFT_CALIBRATE [PROBE=<probe name>] [TARGET=<value>] [STEP=<value>]`:
++Initiates probe drift calibration for eddy current based probes.  The `TARGET`
++is a target temperature for the last sample.  When the temperature recorded
++during a sample exceeds the `TARGET` calibration will complete.  The `STEP`
++parameter sets temperature delta (in C) between samples. After a sample has
++been taken, this delta is used to schedule a call to `PROBE_DRIFT_NEXT`.  The
++default `STEP` is 2.
++
++#### PROBE_DRIFT_NEXT
++`PROBE_DRIFT_NEXT`: After calibration has started this command is run to take
++the next sample.  It is automatically scheduled to run when the delta specified
++by `STEP` has been reached, however its also possible to manually run this
++command to force a new sample.  This command is only available during
++calibration.
++
++#### PROBE_DRIFT_COMPLETE:
++`PROBE_DRIFT_COMPLETE`:  Can be used to end calibration and save the
++current result before the `TARGET` temperature is reached.  This command
++is only available during calibration.
++
++#### ABORT
++`ABORT`:  Aborts the calibration process, discarding the current results.
++This command is only available during drift calibration.
+diff --git a/klippy/extras/bed_mesh.py b/klippy/extras/bed_mesh.py
+index 095ccf1f..da8d71e9 100644
+--- a/klippy/extras/bed_mesh.py
++++ b/klippy/extras/bed_mesh.py
+@@ -3,7 +3,7 @@
+ # Copyright (C) 2018-2019 Eric Callahan <arksine.code@gmail.com>
+ #
+ # This file may be distributed under the terms of the GNU GPLv3 license.
+-import logging, math, json, collections
++import logging, math, json, collections, time, os
+ from . import probe
+ 
+ PROFILE_VERSION = 1
+@@ -121,6 +121,9 @@ class BedMesh:
+         self.gcode.register_command(
+             'BED_MESH_OFFSET', self.cmd_BED_MESH_OFFSET,
+             desc=self.cmd_BED_MESH_OFFSET_help)
++        self.gcode.register_command(
++            'BED_MESH_DUMP', self.cmd_BED_MESH_DUMP,
++            desc=self.cmd_BED_MESH_DUMP_help)
+         # Register transform
+         gcode_move = self.printer.load_object(config, 'gcode_move')
+         gcode_move.set_move_transform(self)
+@@ -282,6 +285,39 @@ class BedMesh:
+             gcode_move.reset_last_position()
+         else:
+             gcmd.respond_info("No mesh loaded to offset")
++    cmd_BED_MESH_DUMP_help = "Dump mesh data to file for analysis"
++    def cmd_BED_MESH_DUMP(self, gcmd):
++        cmd_params = gcmd.get_command_parameters()
++        fname = cmd_params.pop("FILENAME", None)
++        eventtime = self.printer.get_reactor().monotonic()
++        prb = self.printer.lookup_object("probe", None)
++        th_sts = self.printer.lookup_object("toolhead").get_status(eventtime)
++        mdmp = {"current_mesh": {}, "profiles": self.pmgr.get_profiles()}
++        if self.z_mesh is not None:
++            mdmp["current_mesh"] = {
++                "name": self.z_mesh.get_profile_name(),
++                "probed_matrix": self.z_mesh.get_probed_matrix(),
++                "mesh_matrix": self.z_mesh.get_mesh_matrix(),
++                "mesh_params": self.z_mesh.get_mesh_params()
++            }
++        mdmp["calibration"] = self.bmc.dump_calibration(gcmd)
++        mdmp["probe_offsets"] = [0, 0, 0] if prb is None else prb.get_offsets()
++        mdmp["axis_minimum"] = th_sts["axis_minimum"]
++        mdmp["axis_maximum"] = th_sts["axis_maximum"]
++        # dump the file to the configuration folder's parent, as the config
++        # file is guaranteed to be available.
++        start_args = self.printer.get_start_args()
++        cfgfile = start_args["config_file"]
++        parent = os.path.dirname(cfgfile)
++        if fname is None:
++            postfix = time.strftime("%Y%m%d_%H%M%S")
++            fname = "klipper-bedmesh-%s.json" % (postfix,)
++        else:
++            fname = os.path.normpath(os.path.expanduser(fname))
++        out_path = os.path.join(parent, fname)
++        with open(out_path, "w") as f:
++            json.dump(mdmp, f, indent=2)
++        gcmd.respond_info("Current mesh data dumped to %s" % (out_path,))
+ 
+ 
+ class ZrefMode:
+@@ -294,23 +330,23 @@ class BedMeshCalibrate:
+     ALGOS = ['lagrange', 'bicubic']
+     def __init__(self, config, bedmesh):
+         self.printer = config.get_printer()
+-        self.orig_config = {'radius': None, 'origin': None}
++        self.orig_config = og_cfg = {'radius': None, 'origin': None}
+         self.radius = self.origin = None
+         self.mesh_min = self.mesh_max = (0., 0.)
+         self.adaptive_margin = config.getfloat('adaptive_margin', 0.0)
+-        self.zero_ref_pos = config.getfloatlist(
++        self.zero_ref_pos = zrpos = config.getfloatlist(
+             "zero_reference_position", None, count=2
+         )
+         self.zero_reference_mode = ZrefMode.DISABLED
+-        self.faulty_regions = []
+-        self.substituted_indices = collections.OrderedDict()
+         self.bedmesh = bedmesh
+         self.mesh_config = collections.OrderedDict()
+         self._init_mesh_config(config)
++        self.path_generator = PathGenerator(config, og_cfg, zrpos)
+         self._generate_points(config.error)
+         self._profile_name = "default"
+         self.probe_helper = probe.ProbePointsHelper(
+-            config, self.probe_finalize, self._get_adjusted_points())
++            config, self.probe_finalize, self.path_generator
++        )
+         self.probe_helper.minimum_points(3)
+         self.probe_helper.use_xy_offsets(True)
+         self.gcode = self.printer.lookup_object('gcode')
+@@ -369,59 +405,14 @@ class BedMeshCalibrate:
+         else:
+             # Zero Reference position outside of mesh
+             self.zero_reference_mode = ZrefMode.PROBE
+-        if not self.faulty_regions:
+-            return
+-        self.substituted_indices.clear()
+-        if self.zero_reference_mode == ZrefMode.PROBE:
+-            # Cannot probe a reference within a faulty region
+-            for min_c, max_c in self.faulty_regions:
+-                if within(self.zero_ref_pos, min_c, max_c):
+-                    opt = "zero_reference_position"
+-                    raise error(
+-                        "bed_mesh: Cannot probe zero reference position at "
+-                        "(%.2f, %.2f) as it is located within a faulty region."
+-                        " Check the value for option '%s'"
+-                        % (self.zero_ref_pos[0], self.zero_ref_pos[1], opt,)
+-                    )
+-        # Check to see if any points fall within faulty regions
+-        if probe_method == "manual":
+-            return
+-        last_y = self.points[0][1]
+-        is_reversed = False
+-        for i, coord in enumerate(self.points):
+-            if not isclose(coord[1], last_y):
+-                is_reversed = not is_reversed
+-            last_y = coord[1]
+-            adj_coords = []
+-            for min_c, max_c in self.faulty_regions:
+-                if within(coord, min_c, max_c, tol=.00001):
+-                    # Point lies within a faulty region
+-                    adj_coords = [
+-                        (min_c[0], coord[1]), (coord[0], min_c[1]),
+-                        (coord[0], max_c[1]), (max_c[0], coord[1])]
+-                    if is_reversed:
+-                        # Swap first and last points for zig-zag pattern
+-                        first = adj_coords[0]
+-                        adj_coords[0] = adj_coords[-1]
+-                        adj_coords[-1] = first
+-                    break
+-            if not adj_coords:
+-                # coord is not located within a faulty region
+-                continue
+-            valid_coords = []
+-            for ac in adj_coords:
+-                # make sure that coordinates are within the mesh boundary
+-                if self.radius is None:
+-                    if within(ac, (min_x, min_y), (max_x, max_y), .000001):
+-                        valid_coords.append(ac)
+-                else:
+-                    dist_from_origin = math.sqrt(ac[0]*ac[0] + ac[1]*ac[1])
+-                    if dist_from_origin <= self.radius:
+-                        valid_coords.append(ac)
+-            if not valid_coords:
+-                raise error("bed_mesh: Unable to generate coordinates"
+-                            " for faulty region at index: %d" % (i))
+-            self.substituted_indices[i] = valid_coords
++        zrf_mode = self.zero_reference_mode
++        min_pt, max_pt = (min_x, min_y), (max_x, max_y)
++        try:
++            self.path_generator.update(
++                points, zrf_mode, min_pt, max_pt, self.radius
++            )
++        except BedMeshError as e:
++            raise error(str(e))
+     def print_generated_points(self, print_func):
+         x_offset = y_offset = 0.
+         probe = self.printer.lookup_object('probe', None)
+@@ -439,9 +430,10 @@ class BedMeshCalibrate:
+                 "bed_mesh: zero_reference_position is (%.2f, %.2f)"
+                 % (self.zero_ref_pos[0], self.zero_ref_pos[1])
+             )
+-        if self.substituted_indices:
++        substitutes = self.path_generator.get_substitutes()
++        if substitutes:
+             print_func("bed_mesh: faulty region points")
+-            for i, v in self.substituted_indices.items():
++            for i, v in substitutes.items():
+                 pt = self.points[i]
+                 print_func("%d (%.2f, %.2f), substituted points: %s"
+                            % (i, pt[0], pt[1], repr(v)))
+@@ -481,42 +473,6 @@ class BedMeshCalibrate:
+             config.get('algorithm', 'lagrange').strip().lower()
+         orig_cfg['tension'] = mesh_cfg['tension'] = config.getfloat(
+             'bicubic_tension', .2, minval=0., maxval=2.)
+-        for i in list(range(1, 100, 1)):
+-            start = config.getfloatlist("faulty_region_%d_min" % (i,), None,
+-                                        count=2)
+-            if start is None:
+-                break
+-            end = config.getfloatlist("faulty_region_%d_max" % (i,), count=2)
+-            # Validate the corners.  If necessary reorganize them.
+-            # c1 = min point, c3 = max point
+-            #  c4 ---- c3
+-            #  |        |
+-            #  c1 ---- c2
+-            c1 = [min([s, e]) for s, e in zip(start, end)]
+-            c3 = [max([s, e]) for s, e in zip(start, end)]
+-            c2 = [c1[0], c3[1]]
+-            c4 = [c3[0], c1[1]]
+-            # Check for overlapping regions
+-            for j, (prev_c1, prev_c3) in enumerate(self.faulty_regions):
+-                prev_c2 = [prev_c1[0], prev_c3[1]]
+-                prev_c4 = [prev_c3[0], prev_c1[1]]
+-                # Validate that no existing corner is within the new region
+-                for coord in [prev_c1, prev_c2, prev_c3, prev_c4]:
+-                    if within(coord, c1, c3):
+-                        raise config.error(
+-                            "bed_mesh: Existing faulty_region_%d %s overlaps "
+-                            "added faulty_region_%d %s"
+-                            % (j+1, repr([prev_c1, prev_c3]),
+-                               i, repr([c1, c3])))
+-                # Validate that no new corner is within an existing region
+-                for coord in [c1, c2, c3, c4]:
+-                    if within(coord, prev_c1, prev_c3):
+-                        raise config.error(
+-                            "bed_mesh: Added faulty_region_%d %s overlaps "
+-                            "existing faulty_region_%d %s"
+-                            % (i, repr([c1, c3]),
+-                               j+1, repr([prev_c1, prev_c3])))
+-            self.faulty_regions.append((c1, c3))
+         self._verify_algorithm(config.error)
+     def _verify_algorithm(self, error):
+         params = self.mesh_config
+@@ -703,6 +659,12 @@ class BedMeshCalibrate:
+                 self.mesh_config['y_count'] = y_cnt
+                 need_cfg_update = True
+ 
++        if "MESH_PPS" in params:
++            xpps, ypps = parse_gcmd_pair(gcmd, 'MESH_PPS', minval=0)
++            self.mesh_config['mesh_x_pps'] = xpps
++            self.mesh_config['mesh_y_pps'] = ypps
++            need_cfg_update = True
++
+         if "ALGORITHM" in params:
+             self.mesh_config['algo'] = gcmd.get('ALGORITHM').strip().lower()
+             need_cfg_update = True
+@@ -713,33 +675,25 @@ class BedMeshCalibrate:
+         if need_cfg_update:
+             self._verify_algorithm(gcmd.error)
+             self._generate_points(gcmd.error, probe_method)
+-            gcmd.respond_info("Generating new points...")
+-            self.print_generated_points(gcmd.respond_info)
+-            pts = self._get_adjusted_points()
+-            self.probe_helper.update_probe_points(pts, 3)
+             msg = "\n".join(["%s: %s" % (k, v)
+                              for k, v in self.mesh_config.items()])
+             logging.info("Updated Mesh Configuration:\n" + msg)
+         else:
+             self._generate_points(gcmd.error, probe_method)
+-            pts = self._get_adjusted_points()
+-            self.probe_helper.update_probe_points(pts, 3)
+-    def _get_adjusted_points(self):
+-        adj_pts = []
+-        if self.substituted_indices:
+-            last_index = 0
+-            for i, pts in self.substituted_indices.items():
+-                adj_pts.extend(self.points[last_index:i])
+-                adj_pts.extend(pts)
+-                # Add one to the last index to skip the point
+-                # we are replacing
+-                last_index = i + 1
+-            adj_pts.extend(self.points[last_index:])
+-        else:
+-            adj_pts = list(self.points)
+-        if self.zero_reference_mode == ZrefMode.PROBE:
+-            adj_pts.append(self.zero_ref_pos)
+-        return adj_pts
++    def dump_calibration(self, gcmd=None):
++        if gcmd is not None and gcmd.get_command_parameters():
++            self.update_config(gcmd)
++        cfg = dict(self.mesh_config)
++        cfg["mesh_min"] = self.mesh_min
++        cfg["mesh_max"] = self.mesh_max
++        cfg["origin"] = self.origin
++        cfg["radius"] = self.radius
++        return {
++            "points": self.points,
++            "config": cfg,
++            "probe_path": list(self.path_generator),
++            "rapid_path": list(self.path_generator.iter_rapid())
++        }
+     cmd_BED_MESH_CALIBRATE_help = "Perform Mesh Bed Leveling"
+     def cmd_BED_MESH_CALIBRATE(self, gcmd):
+         self._profile_name = gcmd.get('PROFILE', "default")
+@@ -768,14 +722,15 @@ class BedMeshCalibrate:
+         x_cnt = params['x_count']
+         y_cnt = params['y_count']
+ 
+-        if self.substituted_indices:
++        substitutes = self.path_generator.get_substitutes()
++        if substitutes:
+             # Replace substituted points with the original generated
+             # point.  Its Z Value is the average probed Z of the
+             # substituted points.
+             corrected_pts = []
+             idx_offset = 0
+             start_idx = 0
+-            for i, pts in self.substituted_indices.items():
++            for i, pts in substitutes.items():
+                 fpt = [p - o for p, o in zip(self.points[i], offsets[:2])]
+                 # offset the index to account for additional samples
+                 idx = i + idx_offset
+@@ -894,6 +849,305 @@ class BedMeshCalibrate:
+             logging.info(
+                 "  %-4d| %-17s| %-25s| %s" % (i, gen_pt, probed_pt, corr_pt))
+ 
++class PathGenerator:
++    def __init__(self, config, orig_config, zrp):
++        self.cfg_overshoot = config.getfloat("scan_overshoot", 0, minval=1.)
++        self.orig_config = orig_config
++        self.faulty_regions = []
++        self.overshoot = self.cfg_overshoot
++        self.zero_ref_pt = zrp
++        self.zref_mode = ZrefMode.DISABLED
++        self.base_points = []
++        self.substitutes = collections.OrderedDict()
++        self.path_cache = []
++        self.is_round = orig_config["radius"] is not None
++        self._init_faulty_regions(config)
++
++    def _init_faulty_regions(self, config):
++        for i in list(range(1, 100, 1)):
++            start = config.getfloatlist("faulty_region_%d_min" % (i,), None,
++                                        count=2)
++            if start is None:
++                break
++            end = config.getfloatlist("faulty_region_%d_max" % (i,), count=2)
++            # Validate the corners.  If necessary reorganize them.
++            # c1 = min point, c3 = max point
++            #  c4 ---- c3
++            #  |        |
++            #  c1 ---- c2
++            c1 = [min([s, e]) for s, e in zip(start, end)]
++            c3 = [max([s, e]) for s, e in zip(start, end)]
++            c2 = [c1[0], c3[1]]
++            c4 = [c3[0], c1[1]]
++            # Check for overlapping regions
++            for j, (prev_c1, prev_c3) in enumerate(self.faulty_regions):
++                prev_c2 = [prev_c1[0], prev_c3[1]]
++                prev_c4 = [prev_c3[0], prev_c1[1]]
++                # Validate that no existing corner is within the new region
++                for coord in [prev_c1, prev_c2, prev_c3, prev_c4]:
++                    if within(coord, c1, c3):
++                        raise config.error(
++                            "bed_mesh: Existing faulty_region_%d %s overlaps "
++                            "added faulty_region_%d %s"
++                            % (j+1, repr([prev_c1, prev_c3]),
++                               i, repr([c1, c3])))
++                # Validate that no new corner is within an existing region
++                for coord in [c1, c2, c3, c4]:
++                    if within(coord, prev_c1, prev_c3):
++                        raise config.error(
++                            "bed_mesh: Added faulty_region_%d %s overlaps "
++                            "existing faulty_region_%d %s"
++                            % (i, repr([c1, c3]),
++                               j+1, repr([prev_c1, prev_c3])))
++            self.faulty_regions.append((c1, c3))
++
++    def get_substitutes(self):
++        return self.substitutes
++
++    def update(self, points, zref_mode, min_pt, max_pt, radius):
++        self.base_points = points
++        self.substitutes.clear()
++        self.zref_mode = zref_mode
++        self.path_cache = []
++        # adjust overshoot
++        min_x, max_x = min_pt[0], max_pt[0]
++        og_min_x = self.orig_config["mesh_min"][0]
++        og_max_x = self.orig_config["mesh_max"][0]
++        add_ovs = min(max(0, min_x - og_min_x), max(0, og_max_x - max_x))
++        self.overshoot = self.cfg_overshoot + math.floor(add_ovs)
++        self._process_faulty_regions(min_pt, max_pt, radius)
++
++    def _process_faulty_regions(self, min_pt, max_pt, radius):
++        if not self.faulty_regions:
++            return
++        # Cannot probe a reference within a faulty region
++        if self.zref_mode == ZrefMode.PROBE:
++            for min_c, max_c in self.faulty_regions:
++                if within(self.zero_ref_pt, min_c, max_c):
++                    opt = "zero_reference_position"
++                    raise BedMeshError(
++                        "bed_mesh: Cannot probe zero reference position at "
++                        "(%.2f, %.2f) as it is located within a faulty region."
++                        " Check the value for option '%s'"
++                        % (self.zero_ref_pt[0], self.zero_ref_pt[1], opt,)
++                    )
++        # Check to see if any points fall within faulty regions
++        last_y = self.base_points[0][1]
++        is_reversed = False
++        for i, coord in enumerate(self.base_points):
++            if not isclose(coord[1], last_y):
++                is_reversed = not is_reversed
++            last_y = coord[1]
++            adj_coords = []
++            for min_c, max_c in self.faulty_regions:
++                if within(coord, min_c, max_c, tol=.00001):
++                    # Point lies within a faulty region
++                    adj_coords = [
++                        (min_c[0], coord[1]), (coord[0], min_c[1]),
++                        (coord[0], max_c[1]), (max_c[0], coord[1])]
++                    if is_reversed:
++                        # Swap first and last points for zig-zag pattern
++                        first = adj_coords[0]
++                        adj_coords[0] = adj_coords[-1]
++                        adj_coords[-1] = first
++                    break
++            if not adj_coords:
++                # coord is not located within a faulty region
++                continue
++            valid_coords = []
++            for ac in adj_coords:
++                # make sure that coordinates are within the mesh boundary
++                if radius is None:
++                    if within(ac, min_pt, max_pt, .000001):
++                        valid_coords.append(ac)
++                else:
++                    dist_from_origin = math.sqrt(ac[0]*ac[0] + ac[1]*ac[1])
++                    if dist_from_origin <= radius:
++                        valid_coords.append(ac)
++            if not valid_coords:
++                raise BedMeshError(
++                    "bed_mesh: Unable to generate coordinates"
++                    " for faulty region at index: %d" % (i)
++                )
++            self.substitutes[i] = valid_coords
++
++    def __getitem__(self, index):
++        # Keep compatibility with ProbePointsHelper standard probing
++        if not self.path_cache:
++            self.path_cache = list(self)
++        return self.path_cache[index]
++
++    def __len__(self):
++        if self.path_cache:
++            return len(self.path_cache)
++        path_len = len(self.base_points)
++        path_len += sum([len(pts) - 1 for pts in self.substitutes.values()])
++        if self.zref_mode == ZrefMode.PROBE:
++            path_len += 1
++        return path_len
++
++    def __iter__(self):
++        for idx, pt in enumerate(self.base_points):
++            if idx in self.substitutes:
++                for sub_pt in self.substitutes[idx]:
++                    yield sub_pt
++            else:
++                yield pt
++        if self.zref_mode == ZrefMode.PROBE:
++            yield self.zero_ref_pt
++
++    def iter_rapid(self):
++        ascnd_x = True
++        last_base_pt = last_mv_pt = self.base_points[0]
++        # Generate initial move point
++        if self.overshoot:
++            overshoot = min(8, self.overshoot)
++            last_mv_pt = (last_base_pt[0] - overshoot, last_base_pt[1])
++            yield last_mv_pt, False
++        for idx, pt in enumerate(self.base_points):
++            # increasing Y indicates direction change
++            dir_change = not isclose(pt[1], last_base_pt[1], abs_tol=1e-6)
++            if idx in self.substitutes:
++                fp_gen = self._gen_faulty_path(
++                    last_mv_pt, idx, ascnd_x, dir_change
++                )
++                for sub_pt, is_smp in fp_gen:
++                    yield sub_pt, is_smp
++                    last_mv_pt = sub_pt
++            else:
++                if dir_change:
++                    for dpt in self._gen_dir_change(last_mv_pt, pt, ascnd_x):
++                        yield dpt, False
++                yield pt, True
++                last_mv_pt = pt
++            last_base_pt = pt
++            ascnd_x ^= dir_change
++        if self.zref_mode == ZrefMode.PROBE:
++            if self.overshoot:
++                ovs = min(4, self.overshoot)
++                ovs = overshoot if ascnd_x else -overshoot
++                yield (last_mv_pt[0] + ovs, last_mv_pt[1]), False
++            yield self.zero_ref_pt, True
++
++    def _gen_faulty_path(self, last_pt, idx, ascnd_x, dir_change):
++        subs = self.substitutes[idx]
++        sub_cnt = len(subs)
++        if dir_change:
++            for dpt in self._gen_dir_change(last_pt, subs[0], ascnd_x):
++                yield dpt, False
++        if self.is_round:
++            # No faulty region path handling for round beds
++            for pt in subs:
++                yield pt, True
++            return
++        # Check to see if this is the first corner
++        first_corner = False
++        sorted_sub_idx = sorted(self.substitutes.keys())
++        if sub_cnt == 2 and idx < len(sorted_sub_idx):
++            first_corner = sorted_sub_idx[idx] == idx
++        yield subs[0], True
++        if sub_cnt == 1:
++            return
++        last_pt, next_pt = subs[:2]
++        if sub_cnt == 2:
++            if first_corner or dir_change:
++                # horizontal move first
++                yield (next_pt[0], last_pt[1]), False
++            else:
++                yield (last_pt[0], next_pt[1]), False
++            yield next_pt, True
++        elif sub_cnt >= 3:
++            if dir_change:
++                # first move should be a vertical switch up.  If overshoot
++                # is available, simulate another direction change.  Otherwise
++                # move inward 2 mm, then up through the faulty region.
++                if self.overshoot:
++                    for dpt in self._gen_dir_change(last_pt, next_pt, ascnd_x):
++                        yield dpt, False
++                else:
++                    shift = -2 if ascnd_x else 2
++                    yield (last_pt[0] + shift, last_pt[1]), False
++                    yield (last_pt[0] + shift, next_pt[1]), False
++                yield next_pt, True
++                last_pt, next_pt = subs[1:3]
++            else:
++                # vertical move
++                yield (last_pt[0], next_pt[1]), False
++                yield next_pt, True
++                last_pt, next_pt = subs[1:3]
++                if sub_cnt == 4:
++                    # Vertical switch up within faulty region
++                    shift = 2 if ascnd_x else -2
++                    yield (last_pt[0] + shift, last_pt[1]), False
++                    yield (next_pt[0] - shift, next_pt[1]), False
++                    yield next_pt, True
++                    last_pt, next_pt = subs[2:4]
++            # horizontal move before final point
++            yield (next_pt[0], last_pt[1]), False
++            yield next_pt, True
++
++    def _gen_dir_change(self, last_pt, next_pt, ascnd_x):
++        if not self.overshoot:
++            return
++        # overshoot X beyond the outer point
++        xdir = 1 if ascnd_x else -1
++        overshoot = 2. if self.overshoot >= 3. else self.overshoot
++        ovr_pt = (last_pt[0] + overshoot * xdir, last_pt[1])
++        yield ovr_pt
++        if self.overshoot < 3.:
++            # No room to generate an arc, move up to next y
++            yield (next_pt[0] + overshoot * xdir, next_pt[1])
++        else:
++            # generate arc
++            STEP_ANGLE = 3
++            START_ANGLE = 270
++            ydiff = abs(next_pt[1] - last_pt[1])
++            xdiff = abs(next_pt[0] - last_pt[0])
++            max_radius = min(self.overshoot - 2, 8)
++            radius = min(ydiff / 2, max_radius)
++            origin = [ovr_pt[0], last_pt[1] + radius]
++            next_origin_y = next_pt[1] - radius
++            # determine angle
++            if xdiff < .01:
++                # Move is aligned on the x-axis
++                angle = 90
++                if next_origin_y - origin[1] < .05:
++                    # The move can be completed in a single arc
++                    angle = 180
++            else:
++                angle = int(math.degrees(math.atan(ydiff / xdiff)))
++                if (
++                    (ascnd_x and next_pt[0] < last_pt[0]) or
++                    (not ascnd_x and next_pt[0] > last_pt[0])
++                ):
++                    angle = 180 - angle
++            count = int(angle // STEP_ANGLE)
++            # Gen first arc
++            step = STEP_ANGLE * xdir
++            start = START_ANGLE + step
++            for arc_pt in self._gen_arc(origin, radius, start, step, count):
++                yield arc_pt
++            if angle == 180:
++                # arc complete
++                return
++            # generate next arc
++            origin = [next_pt[0] + overshoot * xdir, next_origin_y]
++            # start at the angle where the last arc finished
++            start = START_ANGLE + count * step
++            # recalculate the count to make sure we generate a full 180
++            # degrees.  Add a step for the repeated connecting angle
++            count = 61 - count
++            for arc_pt in self._gen_arc(origin, radius, start, step, count):
++                yield arc_pt
++
++    def _gen_arc(self, origin, radius, start, step, count):
++        end = start + step * count
++        # create a segent for every 3 degress of travel
++        for angle in range(start, end, step):
++            rad = math.radians(angle % 360)
++            opp = math.sin(rad) * radius
++            adj = math.cos(rad) * radius
++            yield (origin[0] + adj, origin[1] + opp)
+ 
+ class MoveSplitter:
+     def __init__(self, config, gcode):
+diff --git a/klippy/extras/ldc1612.py b/klippy/extras/ldc1612.py
+index cdc01e04..142e6a39 100644
+--- a/klippy/extras/ldc1612.py
++++ b/klippy/extras/ldc1612.py
+@@ -78,7 +78,7 @@ class LDC1612:
+         self.printer = config.get_printer()
+         self.calibration = calibration
+         self.dccal = DriveCurrentCalibrate(config, self)
+-        self.data_rate = 250
++        self.data_rate = config.getint("data_rate", 250, minval=250)
+         # Setup mcu sensor_ldc1612 bulk query code
+         self.i2c = bus.MCU_I2C_from_config(config,
+                                            default_addr=LDC1612_ADDR,
+diff --git a/klippy/extras/probe.py b/klippy/extras/probe.py
+index 073c875c..4bb61b1c 100644
+--- a/klippy/extras/probe.py
++++ b/klippy/extras/probe.py
+@@ -110,8 +110,16 @@ class PrinterProbe:
+         if gcmd is not None:
+             return gcmd.get_float("LIFT_SPEED", self.lift_speed, above=0.)
+         return self.lift_speed
++    def get_probe_speed(self, gcmd=None):
++        if gcmd is not None:
++            return gcmd.get_float("PROBE_SPEED", self.speed, above=0.)
++        return self.speed
+     def get_offsets(self):
+         return self.x_offset, self.y_offset, self.z_offset
++    def get_probe_name(self):
++        return self.name
++    def is_scanning_probe(self):
++        return getattr(self.mcu_probe, "HAS_SCANNING", False)
+     def _probe(self, speed):
+         toolhead = self.printer.lookup_object('toolhead')
+         curtime = self.printer.get_reactor().monotonic()
+@@ -424,12 +432,21 @@ class ProbePointsHelper:
+         def_move_z = self.default_horizontal_move_z
+         self.horizontal_move_z = gcmd.get_float('HORIZONTAL_MOVE_Z',
+                                                 def_move_z)
+-        if probe is None or method != 'automatic':
++        if probe is None or method not in ["automatic", "scan"]:
+             # Manual probe
+             self.lift_speed = self.speed
+             self.probe_offsets = (0., 0., 0.)
+             self._manual_probe_start()
+             return
++        if method == "scan" and probe.is_scanning_probe():
++            # Perform surface scan
++            from . import probe_eddy_current
++            scan_helper = probe_eddy_current.ProbeScanHelper(
++                self.printer, self.probe_points, self.use_offsets,
++                self.speed, self.horizontal_move_z, self.finalize_callback
++            )
++            scan_helper.perform_scan(gcmd)
++            return
+         # Perform automatic probing
+         self.lift_speed = probe.get_lift_speed(gcmd)
+         self.probe_offsets = probe.get_offsets()
+diff --git a/klippy/extras/probe_eddy_current.py b/klippy/extras/probe_eddy_current.py
+index 3f4a5e20..4fdd9485 100644
+--- a/klippy/extras/probe_eddy_current.py
++++ b/klippy/extras/probe_eddy_current.py
+@@ -6,15 +6,18 @@
+ import logging, math, bisect
+ import mcu
+ from . import ldc1612, probe, manual_probe
++from mathutil import Polynomial2d
+ 
+ # Tool for calibrating the sensor Z detection and applying that calibration
+ class EddyCalibration:
+     def __init__(self, config):
+         self.printer = config.get_printer()
+         self.name = config.get_name()
++        self.drift_comp = EddyDriftCompensation(config)
+         # Current calibration data
+         self.cal_freqs = []
+         self.cal_zpos = []
++        self.cal_temp = config.getfloat('calibration_temp', 0)
+         cal = config.get('calibrate', None)
+         if cal is not None:
+             cal = [list(map(float, d.strip().split(':', 1)))
+@@ -36,7 +39,8 @@ class EddyCalibration:
+         self.cal_zpos = [c[1] for c in cal]
+     def apply_calibration(self, samples):
+         for i, (samp_time, freq, dummy_z) in enumerate(samples):
+-            pos = bisect.bisect(self.cal_freqs, freq)
++            adj_freq = self.drift_comp.adjust_freq(freq, self.cal_temp)
++            pos = bisect.bisect(self.cal_freqs, adj_freq)
+             if pos >= len(self.cal_zpos):
+                 zpos = -99.9
+             elif pos == 0:
+@@ -49,7 +53,7 @@ class EddyCalibration:
+                 prev_zpos = self.cal_zpos[pos - 1]
+                 gain = (this_zpos - prev_zpos) / (this_freq - prev_freq)
+                 offset = prev_zpos - prev_freq * gain
+-                zpos = freq * gain + offset
++                zpos = adj_freq * gain + offset
+             samples[i] = (samp_time, freq, round(zpos, 6))
+     def height_to_freq(self, height):
+         # XXX - could optimize lookup
+@@ -65,7 +69,8 @@ class EddyCalibration:
+         prev_zpos = rev_zpos[pos - 1]
+         gain = (this_freq - prev_freq) / (this_zpos - prev_zpos)
+         offset = prev_freq - prev_zpos * gain
+-        return height * gain + offset
++        freq = height * gain + offset
++        return self.drift_comp.lookup_freq(freq, self.cal_temp)
+     def do_calibration_moves(self, move_speed):
+         toolhead = self.printer.lookup_object('toolhead')
+         kin = toolhead.get_kinematics()
+@@ -80,6 +85,7 @@ class EddyCalibration:
+             return True
+         self.printer.lookup_object(self.name).add_client(handle_batch)
+         toolhead.dwell(1.)
++        temp = self.drift_comp.get_temperature()
+         # Move to each 40um position
+         max_z = 4.0
+         samp_dist = 0.040
+@@ -106,6 +112,7 @@ class EddyCalibration:
+             times.append((start_query_time, end_query_time, kin_pos[2]))
+         toolhead.dwell(1.0)
+         toolhead.wait_moves()
++        temp = (temp + self.drift_comp.get_temperature()) / 2.
+         # Finish data collection
+         is_finished = True
+         # Correlate query responses
+@@ -121,7 +128,7 @@ class EddyCalibration:
+         if len(cal) != len(times):
+             raise self.printer.command_error(
+                 "Failed calibration - incomplete sensor data")
+-        return cal
++        return cal, temp
+     def calc_freqs(self, meas):
+         total_count = total_variance = 0
+         positions = {}
+@@ -152,7 +159,7 @@ class EddyCalibration:
+         curpos[2] -= 5. - 0.050
+         move(curpos, self.probe_speed)
+         # Perform calibration movement and capture
+-        cal = self.do_calibration_moves(self.probe_speed)
++        cal, temp = self.do_calibration_moves(self.probe_speed)
+         # Calculate each sample position average and variance
+         positions, std, total = self.calc_freqs(cal)
+         last_freq = 0.
+@@ -176,15 +183,25 @@ class EddyCalibration:
+         cal_contents.pop()
+         configfile = self.printer.lookup_object('configfile')
+         configfile.set(self.name, 'calibrate', ''.join(cal_contents))
++        configfile.set(self.name, 'calibration_temp', "%.6f" % (temp,))
+     cmd_EDDY_CALIBRATE_help = "Calibrate eddy current probe"
+     def cmd_EDDY_CALIBRATE(self, gcmd):
+         self.probe_speed = gcmd.get_float("PROBE_SPEED", 5., above=0.)
++        toolhead = self.printer.lookup_object('toolhead')
++        curtime = self.printer.get_reactor().monotonic()
++        if 'xy' not in toolhead.get_status(curtime)['homed_axes']:
++            raise self.printer.command_error("Must home X and Y before probe")
++        if 'z' not in toolhead.get_status(curtime)['homed_axes']:
++            pos = toolhead.get_position()
++            pos[2] = toolhead.get_status(curtime)["axis_maximum"][2]
++            toolhead.set_position(pos, homing_axes=[2])
+         # Start manual probe
+         manual_probe.ManualProbeHelper(self.printer, gcmd,
+                                        self.post_manual_probe)
+ 
+ # Helper for implementing PROBE style commands
+ class EddyEndstopWrapper:
++    HAS_SCANNING = True
+     REASON_SENSOR_ERROR = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 1
+     def __init__(self, config, sensor_helper, calibration):
+         self._printer = config.get_printer()
+@@ -330,6 +347,528 @@ class PrinterEddyProbe:
+         self.printer.add_object('probe', probe.PrinterProbe(config, self.probe))
+     def add_client(self, cb):
+         self.sensor_helper.add_client(cb)
++    def stream(self, cb):
++        return StreamingContext(self, cb)
++
++DRIFT_SAMPLE_COUNT = 9
++
++class EddyDriftCompensation:
++    def __init__(self, config):
++        self.printer = config.get_printer()
++        self.name = config.get_name()
++        self.drift_calibration = None
++        self.calibration_samples = None
++        self.dc_min_temp = config.getfloat("drift_calibration_min_temp", 0.)
++        dc = config.getlists(
++            "drift_calibration", None, seps=(',', '\n'), parser=float
++        )
++        self.min_freq = 999999999999.
++        if dc is not None:
++            for coefs in dc:
++                if len(coefs) != 3:
++                    raise config.error(
++                        "Invalid polynomial in drift calibration"
++                    )
++            self.drift_calibration = [Polynomial2d(*coefs) for coefs in dc]
++            cal = self.drift_calibration
++            self._check_calibration(cal, self.dc_min_temp, config.error)
++            low_poly = self.drift_calibration[-1]
++            self.min_freq = min([low_poly(temp) for temp in range(121)])
++            cal_str = "\n".join([repr(p) for p in cal])
++            logging.info(
++                "%s: loaded temperature drift calibration. Min Temp: %.2f,"
++                " Min Freq: %.6f\n%s"
++                % (self.name, self.dc_min_temp, self.min_freq, cal_str)
++            )
++        else:
++            logging.info(
++                "%s: No drift calibration configured, disabling temperature "
++                "compensation"
++                % (self.name,)
++            )
++        self.enabled = has_dc = self.drift_calibration is not None
++        cal_temp = config.getfloat('calibration_temp', 0)
++        if cal_temp < 1e-6 and has_dc:
++            self.enabled = False
++            logging.info(
++                "%s: No temperature saved for eddy probe calibration, "
++                "disabling temperature compensation."
++                % (self.name,)
++            )
++
++        temp_section = "temperature_probe " + self.name.split(maxsplit=1)[-1]
++        self.temp_sensor = None
++        if config.has_section(temp_section):
++            self.temp_sensor = self.printer.load_object(
++                config, temp_section
++            )
++            self.temp_sensor.register_calibration_helper(self)
++        if self.temp_sensor is None and has_dc:
++            self.enabled = False
++            logging.info(
++                "%s: Temperature Sensor [%s] not configured, "
++                "disabling temperature compensation"
++                % (self.name, temp_section)
++            )
++
++    def is_enabled(self):
++        return self.enabled
++
++    def collect_sample(self, kin_pos, tool_zero_z, speeds):
++        if self.calibration_samples is None:
++            self.calibration_samples = [[] for _ in range(DRIFT_SAMPLE_COUNT)]
++        move_times = []
++        probe_samples = [[] for _ in range(DRIFT_SAMPLE_COUNT)]
++        scanner = self.printer.lookup_object(self.name)
++        toolhead = self.printer.lookup_object("toolhead")
++        reactor = self.printer.get_reactor()
++        cur_pos = toolhead.get_position()
++        sample_temp = self.get_temperature()
++        lift_speed, probe_speed, _ = speeds
++
++        def _on_data_recd(msg):
++            data = msg["data"]
++            if not move_times:
++                return
++            idx, start_time, end_time = move_times[0]
++            for sample in data:
++                ptime = sample[0]
++                while ptime > end_time:
++                    move_times.pop(0)
++                    if not move_times:
++                        return
++                    idx, start_time, end_time = move_times[0]
++                if ptime < start_time:
++                    continue
++                probe_samples[idx].append(sample)
++        with scanner.stream(_on_data_recd):
++            for i in range(DRIFT_SAMPLE_COUNT):
++                if i == 0:
++                    # Move down to first sample location
++                    cur_pos[2] = tool_zero_z + .05
++                else:
++                    # Sample each .5mm in z
++                    cur_pos[2] += 1.
++                    toolhead.manual_move(cur_pos, lift_speed)
++                    cur_pos[2] -= .5
++                toolhead.manual_move(cur_pos, probe_speed)
++                start = toolhead.get_last_move_time() + .05
++                end = start + .1
++                move_times.append((i, start, end))
++                toolhead.dwell(.2)
++            toolhead.wait_moves()
++            sample_temp = (sample_temp + self.get_temperature()) / 2.
++            reactor.pause(reactor.monotonic() + .2)
++        for i, data in enumerate(probe_samples):
++            freqs = [d[1] for d in data]
++            zvals = [d[2] for d in data]
++            avg_freq = sum(freqs) / len(freqs)
++            avg_z = sum(zvals) / len(zvals)
++            kin_z = i * .5 + .05 + kin_pos[2]
++            logging.info(
++                "Probe Values at Temp %.2fC, Z %.4fmm: Avg Freq = %.6f, "
++                "Avg Measured Z = %.6f"
++                % (sample_temp, kin_z, avg_freq, avg_z)
++            )
++            self.calibration_samples[i].append((sample_temp, avg_freq))
++        return sample_temp
++
++    def start_calibration(self):
++        self.calibration_samples = [[] for _ in range(DRIFT_SAMPLE_COUNT)]
++
++    def finish_calibration(self, success):
++        cal_samples = self.calibration_samples
++        self.calibration_samples = None
++        if not success:
++            return
++        gcode = self.printer.lookup_object("gcode")
++        if len(cal_samples) < 3:
++            raise gcode.error(
++                "calbration error, not enough samples"
++            )
++        min_temp, _ = cal_samples[0][0]
++        polynomials = []
++        for i, coords in enumerate(cal_samples):
++            height = .05 + i * .5
++            poly = Polynomial2d.fit(coords)
++            polynomials.append(poly)
++            logging.info("Polynomial at Z=%.2f: %s" % (height, repr(poly)))
++        self._check_calibration(polynomials, min_temp)
++        coef_cfg = "\n" + "\n".join([str(p) for p in polynomials])
++        configfile = self.printer.lookup_object('configfile')
++        configfile.set(self.name, "drift_calibration", coef_cfg)
++        configfile.set(self.name, "drift_calibration_min_temp", min_temp)
++        gcode.respond_info(
++            "%s: generated %d 2D polynomials\n"
++            "The SAVE_CONFIG command will update the printer config "
++            "file and restart the printer."
++            % (self.name, len(polynomials))
++        )
++        try:
++            # Dump collected data to temporary file
++            import json
++            ctime = int(self.printer.get_reactor().monotonic())
++            tmpfname = "/tmp/eddy-probe-drift-%d.json" % (ctime)
++            out = {
++                "polynomial_coefs": [c.get_coefs() for c in polynomials],
++                "legend": ["temperature", "frequency"],
++                "data": cal_samples,
++                "start_z": .05,
++                "sample_z_dist": .5
++            }
++            with open(tmpfname, "w") as f:
++                f.write(json.dumps(out))
++        except Exception:
++            logging.exception("Failed to write %s" % (tmpfname))
++
++    def _check_calibration(self, calibration, start_temp, error=None):
++        error = error or self.printer.command_error
++        start = int(start_temp)
++        for temp in range(start, 121, 1):
++            last_freq = calibration[0](temp)
++            for i, poly in enumerate(calibration[1:]):
++                next_freq = poly(temp)
++                if next_freq >= last_freq:
++                    # invalid polynomial
++                    raise error(
++                        "%s: invalid calibration detected, curve at index "
++                        "%d overlaps previous curve at temp %dC."
++                        % (self.name, i + 1, temp)
++                    )
++                last_freq = next_freq
++
++    def adjust_freq(self, freq, dest_temp):
++        # Adjusts frequency from current temperature toward
++        # destination temperature
++        if not self.enabled or freq < self.min_freq:
++            return freq
++        cur_temp = self.temp_sensor.get_temp()[0]
++        return self._calc_freq(freq, cur_temp, dest_temp)
++
++    def lookup_freq(self, freq, origin_temp):
++        # Given a frequency and its orignal sampled temp, find the
++        # offset frequency based on the current temp
++        if not self.enabled or freq < self.min_freq:
++            return freq
++        cur_temp = self.temp_sensor.get_temp()[0]
++        return self._calc_freq(freq, origin_temp, cur_temp)
++
++    def _calc_freq(self, freq, origin_temp, dest_temp):
++        high_freq = low_freq = None
++        dc = self.drift_calibration
++        for pos, poly in enumerate(dc):
++            high_freq = low_freq
++            low_freq = poly(origin_temp)
++            if freq >= low_freq:
++                if high_freq is None:
++                    # Freqency above max calibration value
++                    return dc[0](dest_temp)
++                t = min(1., max(0., (freq - low_freq) / (high_freq - low_freq)))
++                low_tgt_freq = poly(dest_temp)
++                high_tgt_freq = dc[pos-1](dest_temp)
++                return (1 - t) * low_tgt_freq + t * high_tgt_freq
++        # Frequency below minimum, no correction
++        return freq
++
++    def get_temperature(self):
++        if self.temp_sensor is not None:
++            return self.temp_sensor.get_temp()[0]
++        return 0.
++
++class StreamingContext:
++    def __init__(self, scanning_probe, callback):
++        self.scanner = scanning_probe
++        self.callback = callback
++        self.reactor = scanning_probe.printer.get_reactor()
++        self.done_completion = None
++        self.stream_enabled = False
++
++    def __enter__(self):
++        self.stream_enabled = True
++        self.scanner.add_client(self._bulk_callback)
++
++    def __exit__(self, type=None, value=None, tb=None):
++        self.done_completion = self.reactor.completion()
++        self.stream_enabled = False
++        self.done_completion.wait()
++        self.done_completion = None
++
++    def _bulk_callback(self, msg):
++        if not self.stream_enabled:
++            if self.done_completion is not None:
++                self.done_completion.complete(None)
++            return False
++        self.callback(msg)
++        return True
++
++
++MAX_HIT_DIST = 2.
++MM_WIN_SPEED = 125
++
++class SamplingMode:
++    STANDARD = 0
++    WEIGHTED = 1
++    CENTERED = 2
++    LINEAR = 3
++
++    @staticmethod
++    def from_str(sampling_type):
++        return getattr(SamplingMode, sampling_type.upper(), 0)
++
++    def to_str(sampling_idx):
++        return {
++            val: name.lower() for name, val in SamplingMode.__dict__.items()
++            if name[0].isupper() and isinstance(val, int)
++        }.get(sampling_idx, "standard")
++
++
++class ProbeScanHelper:
++    def __init__(
++            self, printer, points, use_offsets, speed,
++            horizontal_move_z, finalize_cb
++    ):
++        self.printer = printer
++        self.points = points
++        self.probe = self.printer.lookup_object("probe")
++        self.probe_offsets = self.probe.get_offsets()
++        self.use_offsets = use_offsets
++        self.speed = speed
++        self.scan_height = horizontal_move_z
++        self.finalize_callback = finalize_cb
++        self.min_time_window = 0
++        self.max_time_window = 0
++        self.sampling_mode = SamplingMode.STANDARD
++        self.reset()
++
++    def reset(self):
++        self.samples_pending = []
++        self.lookahead_index = 0
++        self.sample_index = 0
++
++    def perform_scan(self, gcmd):
++        mode = gcmd.get("SCAN_MODE", "detailed")
++        speed = gcmd.get_float("SCAN_SPEED", self.speed)
++        default_sm = "centered" if mode == "detailed" else "standard"
++        sampling_mode = gcmd.get("SAMPLES_RESULT", default_sm)
++        self.sampling_mode = SamplingMode.from_str(sampling_mode)
++        gcmd.respond_info(
++            "Beginning %s surface scan at height %.2f, sampling mode %s..."
++            % (mode, self.scan_height, SamplingMode.to_str(self.sampling_mode))
++        )
++        while True:
++            self.reset()
++            if mode == "rapid":
++                results = self._rapid_scan(gcmd, speed)
++            else:
++                results = self._detailed_scan(gcmd, speed)
++            # There is no z_offset since the scan height is used
++            # to calculate the "probed" position
++            offsets = list(self.probe_offsets)
++            offsets[2] = 0
++            ret = self.finalize_callback(tuple(offsets), results)
++            if ret != "retry":
++                break
++
++    def _detailed_scan(self, gcmd, speed):
++        scanner = self.printer.lookup_object(self.probe.get_probe_name())
++        toolhead = self.printer.lookup_object("toolhead")
++        sample_time = gcmd.get_float("SAMPLE_TIME", .1, above=.1)
++        sample_time += .05
++        self._raise_tool(gcmd)
++        # Start sampling and go
++        reactor = self.printer.get_reactor()
++        self.min_time_window = -0.05
++        self.max_time_window = sample_time
++        with scanner.stream(self._on_bulk_data_collected):
++            for idx, pos in enumerate(self.points):
++                pos = self._apply_offsets(pos[:2])
++                toolhead.manual_move(pos, speed)
++                if idx == 0:
++                    self._move_to_scan_height(gcmd)
++                toolhead.register_lookahead_callback(self._lookahead_callback)
++                toolhead.dwell(sample_time)
++            toolhead.wait_moves()
++            reactor.pause(reactor.monotonic() + .2)
++        return self._process_batch_measurements(gcmd)
++
++    def _rapid_scan(self, gcmd, speed):
++        scanner = self.printer.lookup_object(self.probe.get_probe_name())
++        toolhead = self.printer.lookup_object("toolhead")
++        # Calculate time window around which a sample is valid.  Current
++        # assumption is anything within 2mm is usable, so:
++        # window = 2 / max_speed
++        #
++        # TODO: validate maximum speed allowed based on sample rate of probe
++        # Scale the hit distance window for speeds lower than 125mm/s.  The
++        # lower the speed the less the window shrinks.
++        scale = max(0, 1 - speed / MM_WIN_SPEED) + 1
++        hit_dist = min(MAX_HIT_DIST, scale * speed / MM_WIN_SPEED)
++        window = hit_dist / speed
++        gcmd.respond_info(
++            "Sample hit distance +/- %.4fmm, time window +/- ms %.4f"
++            % (hit_dist, window * 1000)
++        )
++        self.min_time_window = self.max_time_window = window
++        self._raise_tool(gcmd)
++        # Start sampling and go
++        reactor = self.printer.get_reactor()
++        with scanner.stream(self._on_bulk_data_collected):
++            ptgen = getattr(self.points, "iter_rapid", self._rapid_default_gen)
++            for idx, (pos, is_probe_pt) in enumerate(ptgen()):
++                pos = self._apply_offsets(pos[:2])
++                toolhead.manual_move(pos, speed)
++                if idx == 0:
++                    self._move_to_scan_height(gcmd)
++                if is_probe_pt:
++                    toolhead.register_lookahead_callback(
++                        self._lookahead_callback
++                    )
++            toolhead.wait_moves()
++            reactor.pause(reactor.monotonic() + .2)
++        return self._process_batch_measurements(gcmd)
++
++    def _rapid_default_gen(self):
++        for pt in self.points:
++            yield pt, True
++
++    def _raise_tool(self, gcmd):
++        # If the nozzle is below scan height raise the tool
++        toolhead = self.printer.lookup_object("toolhead")
++        cur_pos = toolhead.get_position()
++        if cur_pos[2] >= self.scan_height:
++            return
++        lift_speed = self.probe.get_lift_speed(gcmd)
++        cur_pos[2] = self.scan_height + .5
++        toolhead.manual_move(cur_pos, lift_speed)
++
++    def _move_to_scan_height(self, gcmd):
++        toolhead = self.printer.lookup_object("toolhead")
++        cur_pos = toolhead.get_position()
++        lift_speed = self.probe.get_lift_speed(gcmd)
++        probe_speed = self.probe.get_probe_speed(gcmd)
++        cur_pos[2] = self.scan_height + .5
++        toolhead.manual_move(cur_pos, lift_speed)
++        cur_pos[2] = self.scan_height
++        toolhead.manual_move(cur_pos, probe_speed)
++        toolhead.dwell(abs(self.min_time_window) + .01)
++
++    def _apply_offsets(self, point):
++        if self.use_offsets:
++            return [(pos - ofs) for pos, ofs in zip(point, self.probe_offsets)]
++        return point
++
++    def _lookahead_callback(self, print_time):
++        pt = self._apply_offsets(self.points[self.lookahead_index])
++        self.lookahead_index += 1
++        self.samples_pending.append((print_time, pt, []))
++
++    def _on_bulk_data_collected(self, msg):
++        idx = self.sample_index
++        if len(self.samples_pending) < idx + 1:
++            return
++        req_time, _, z_samples = self.samples_pending[idx]
++        data = msg["data"]
++        for ptime, _, z in data:
++            while ptime > req_time + self.max_time_window:
++                self.sample_index += 1
++                idx = self.sample_index
++                if len(self.samples_pending) < idx + 1:
++                    return
++                req_time, _, z_samples = self.samples_pending[idx]
++            if ptime < req_time - self.min_time_window:
++                continue
++            z_samples.append((ptime, z))
++
++    def _process_batch_measurements(self, gcmd):
++        results = []
++        if len(self.samples_pending) != len(self.points):
++            raise gcmd.error(
++                "Position sample length does not match number of points "
++                "requested, received: %d, requested %d"
++                % (len(self.samples_pending), len(self.points))
++            )
++        last_sample = (0, 0, [])
++        overlaps = set()
++        for idx, sample in enumerate(self.samples_pending):
++            # look behind for overlapping samples
++            min_smample_time = sample[0] - self.min_time_window
++            z_samples = sample[2]
++            for zs in last_sample[2]:
++                if zs in z_samples:
++                    continue
++                if zs[0] >= min_smample_time:
++                    z_samples.append(zs)
++                    overlaps.add(idx)
++            z_samples.sort(key=lambda s: s[0])
++            results.append(self._process_samples(gcmd, sample))
++            last_sample = sample
++        if overlaps:
++            logging.info("Detected %d overlapping samples" % (len(overlaps),))
++        return results
++
++    def _process_samples(self, gcmd, sample):
++        move_time, pos, z_samples = sample
++        valid_samples = []
++        for sample in z_samples:
++            if abs(sample[1]) > 99.0:
++                logging.info(
++                    "Z-sample at time %.6f for position (%.6f, %.6f) is "
++                    "invalid.  Verify that 'horizontal_move_z' not too high."
++                    % (sample[0], pos[0], pos[1])
++                )
++            else:
++                valid_samples.append(sample)
++        sample_len = len(valid_samples)
++        if sample_len == 0:
++            raise gcmd.error(
++                "No valid measurements found at coordinate : %s"
++                % (repr(pos),)
++            )
++        if self.sampling_mode == SamplingMode.CENTERED:
++            # Average middle samples
++            z_vals = sorted([s[1] for s in valid_samples])
++            discard_count = len(z_vals) // 4
++            keep_vals = z_vals[discard_count:-discard_count]
++            sample_len = len(keep_vals)
++            z_height = sum(keep_vals) / sample_len
++        elif self.sampling_mode == SamplingMode.WEIGHTED:
++            # Perform a weighted average
++            time_diffs = [abs(move_time - s[0]) for s in valid_samples]
++            max_diff = max(time_diffs)
++            # Add weight as a factor of the furthest sample
++            weights = [max_diff / diff for diff in time_diffs]
++            total_weight = sum(weights)
++            z_height = 0
++            for weight, sample in zip(weights, valid_samples):
++                factor = weight / total_weight
++                z_height += sample[1] * factor
++        elif self.sampling_mode == SamplingMode.LINEAR:
++            sample_times = [s[0] for s in valid_samples]
++            idx = bisect.bisect(sample_times, move_time)
++            if idx == 0:
++                z_height = valid_samples[0][1]
++            elif idx == sample_len:
++                z_height = valid_samples[-1][1]
++            else:
++                min_time, min_z = valid_samples[idx - 1]
++                max_time, max_z = valid_samples[idx]
++                time_diff = max_time - min_time
++                time_from_min = move_time - min_time
++                t = min(1, max(0, time_from_min / time_diff))
++                z_height = (1. - t) * min_z + t * max_z
++        else:
++            z_height = sum([s[1] for s in valid_samples]) / sample_len
++        probed_z = self.scan_height - z_height
++        atc = self.printer.lookup_object("axis_twist_compensation", None)
++        if atc is not None:
++            # perform twist compensation on the desired sample position
++            z_comp = atc.get_z_compensation_value(pos)
++            probed_z += z_comp
++        logging.info(
++            "Scan at (%.4f, %.4f) is z=%.6f, height=%.6f, sample count=%d"
++            % (pos[0], pos[1], probed_z, z_height, sample_len)
++        )
++        return [pos[0], pos[1], probed_z]
+ 
+ def load_config_prefix(config):
+     return PrinterEddyProbe(config)
+diff --git a/klippy/mathutil.py b/klippy/mathutil.py
+index a6ab50d2..51cf1a19 100644
+--- a/klippy/mathutil.py
++++ b/klippy/mathutil.py
+@@ -135,3 +135,76 @@ def matrix_sub(m1, m2):
+ 
+ def matrix_mul(m1, s):
+     return [m1[0]*s, m1[1]*s, m1[2]*s]
++
++######################################################################
++# Polynomial Helper Classes and Functions
++######################################################################
++
++def calc_determinant(matrix):
++    m = matrix
++    aei = m[0][0] * m[1][1] * m[2][2]
++    bfg = m[1][0] * m[2][1] * m[0][2]
++    cdh = m[2][0] * m[0][1] * m[1][2]
++    ceg = m[2][0] * m[1][1] * m[0][2]
++    bdi = m[1][0] * m[0][1] * m[2][2]
++    afh = m[0][0] * m[2][1] * m[1][2]
++    return aei + bfg + cdh - ceg - bdi - afh
++
++class Polynomial2d:
++    def __init__(self, a, b, c):
++        self.a = a
++        self.b = b
++        self.c = c
++
++    def __call__(self, xval):
++        return self.c * xval * xval + self.b * xval + self.a
++
++    def get_coefs(self):
++        return (self.a, self.b, self.c)
++
++    def __str__(self):
++        return "%f, %f, %f" % (self.a, self.b, self.c)
++
++    def __repr__(self):
++        parts = ["y(x) ="]
++        deg = 2
++        for i, coef in enumerate((self.c, self.b, self.a)):
++            if round(coef, 8) == int(coef):
++                coef == int(coef)
++            if abs(coef) < 1e-10:
++                continue
++            cur_deg = deg - i
++            x_str = "x^%d" % (cur_deg,) if cur_deg > 1 else "x" * cur_deg
++            if len(parts) == 1:
++                parts.append("%f%s" % (coef, x_str))
++            else:
++                sym = "-" if coef < 0 else "+"
++                parts.append("%s %f%s" % (sym, abs(coef), x_str))
++        return " ".join(parts)
++
++    @classmethod
++    def fit(cls, coords):
++        xlist = [c[0] for c in coords]
++        ylist = [c[1] for c in coords]
++        count = len(coords)
++        sum_x = sum(xlist)
++        sum_y = sum(ylist)
++        sum_x2 = sum([x**2 for x in xlist])
++        sum_x3 = sum([x**3 for x in xlist])
++        sum_x4 = sum([x**4 for x in xlist])
++        sum_xy = sum([x * y for x, y in coords])
++        sum_x2y = sum([y*x**2 for x, y in coords])
++        vector_b = [sum_y, sum_xy, sum_x2y]
++        m = [
++            [count, sum_x, sum_x2],
++            [sum_x, sum_x2, sum_x3],
++            [sum_x2, sum_x3, sum_x4]
++        ]
++        m0 = [vector_b, m[1], m[2]]
++        m1 = [m[0], vector_b, m[2]]
++        m2 = [m[0], m[1], vector_b]
++        det_m = calc_determinant(m)
++        a0 = calc_determinant(m0) / det_m
++        a1 = calc_determinant(m1) / det_m
++        a2 = calc_determinant(m2) / det_m
++        return cls(a0, a1, a2)
+diff --git a/klippy/extras/temperature_probe.py b/klippy/extras/temperature_probe.py
+new file mode 100644
+index 000000000..8c5b385f5
+--- /dev/null
++++ b/klippy/extras/temperature_probe.py
+@@ -0,0 +1,295 @@
++# Probe temperature sensor and drift calibration
++#
++# Copyright (C) 2024 Eric Callahan <arksine.code@gmail.com>
++#
++# This file may be distributed under the terms of the GNU GPLv3 license.
++import logging
++from threading import Lock
++from . import manual_probe
++
++KELVIN_TO_CELSIUS = -273.15
++
++class TemperatureProbe:
++    def __init__(self, config):
++        self.name = config.get_name()
++        self.printer = config.get_printer()
++        self.gcode = self.printer.lookup_object("gcode")
++        self.speed = config.getfloat("speed", None, above=0.)
++        self.horizontal_move_z = config.getfloat(
++            "horizontal_move_z", 2., above=0.
++        )
++        self.resting_z = config.getfloat("resting_z", .4, above=0.)
++        # Setup temperature sensor
++        smooth_time = config.getfloat("smooth_time", 2., above=0.)
++        self.inv_smooth_time = 1. / smooth_time
++        self.min_temp = config.getfloat(
++            "min_temp", KELVIN_TO_CELSIUS, minval=KELVIN_TO_CELSIUS
++        )
++        self.max_temp = config.getfloat(
++            "max_temp", 99999999.9, above=self.min_temp
++        )
++        pheaters = self.printer.load_object(config, "heaters")
++        self.sensor = pheaters.setup_sensor(config)
++        self.sensor.setup_minmax(self.min_temp, self.max_temp)
++        self.sensor.setup_callback(self._temp_callback)
++        pheaters.register_sensor(config, self)
++        self.temp_lock = Lock()
++        self.smoothed_temp = 0.
++        self.last_temp_read_time = 0.
++        self.measured_min = 99999999.
++        self.measured_max = 0.
++
++        # Calibration State
++        self.cal_helper = None
++        self.lift_speed = 5.
++        self.probe_speed = 5.
++        self.next_auto_temp = 99999999.
++        self.target_temp = 0
++        self.expected_count = 0
++        self.sample_count = 0
++        self.in_calibration = False
++        self.step = 2.
++        self.last_zero_pos = None
++        self.total_expansion = 0
++        self.start_pos = []
++
++        # Register GCode Commands
++        pname = self.name.split(maxsplit=1)[-1]
++        self.gcode.register_mux_command(
++            "PROBE_DRIFT_CALIBRATE", "PROBE", pname,
++            self.cmd_PROBE_DRIFT_CALIBRATE,
++            desc=self.cmd_PROBE_DRIFT_CALIBRATE_help
++        )
++
++    def register_calibration_helper(self, helper):
++        self.cal_helper = helper
++
++    def _temp_callback(self, read_time, temp):
++        if not temp:
++            return
++        with self.temp_lock:
++            time_diff = read_time - self.last_temp_read_time
++            self.last_temp_read_time = read_time
++            temp_diff = temp - self.smoothed_temp
++            adj_time = min(time_diff * self.inv_smooth_time, 1.)
++            self.smoothed_temp += temp_diff * adj_time
++            self.measured_min = min(self.measured_min, self.smoothed_temp)
++            self.measured_max = max(self.measured_max, self.smoothed_temp)
++            st = self.smoothed_temp
++            if self.in_calibration and st >= self.next_auto_temp:
++                self.next_auto_temp = 99999999.
++                self.printer.get_reactor().register_async_callback(
++                    lambda e, gc=self.gcode: gc.run_script("PROBE_DRIFT_NEXT")
++                )
++
++    def get_temp(self, eventtime=None):
++        return self.smoothed_temp, self.target_temp
++
++    def _collect_sample(self, kin_pos, tool_zero_z):
++        probe = self._get_probe()
++        x_offset, y_offset, _ = probe.get_offsets()
++        toolhead = self.printer.lookup_object("toolhead")
++        cur_pos = toolhead.get_position()
++        # Move to probe to sample collection position
++        cur_pos[2] += self.horizontal_move_z
++        toolhead.manual_move(cur_pos, self.lift_speed)
++        cur_pos[0] -= x_offset
++        cur_pos[1] -= y_offset
++        move_speed = self.speed or self.probe_speed
++        toolhead.manual_move(cur_pos, move_speed)
++        speeds = (self.lift_speed, self.probe_speed, move_speed)
++        return self.cal_helper.collect_sample(kin_pos, tool_zero_z, speeds)
++
++    def _prepare_next_sample(self, last_temp, tool_zero_z):
++        # Register our own abort command now that the manual
++        # probe has finished and unregistered
++        self.gcode.register_command(
++            "ABORT", self.cmd_PROBE_DRIFT_ABORT,
++            desc=self.cmd_PROBE_DRIFT_ABORT_help
++        )
++        # Move tool down to the resting position
++        toolhead = self.printer.lookup_object("toolhead")
++        cur_pos = toolhead.get_position()
++        cur_pos[2] = tool_zero_z + self.resting_z
++        toolhead.manual_move(cur_pos, self.probe_speed)
++        cnt, exp_cnt = self.sample_count, self.expected_count
++        self.next_auto_temp = last_temp + self.step
++        self.gcode.respond_info(
++            "%s: collected sample %d/%d at temp %.2fC, next sample scheduled "
++            "at temp %.2fC"
++            % (self.name, cnt, exp_cnt, last_temp, self.next_auto_temp)
++        )
++
++    def _manual_probe_finalize(self, kin_pos):
++        if kin_pos is None:
++            # Calibration aborted
++            self._finalize_drift_cal(False)
++            return
++        if self.last_zero_pos is not None:
++            z_diff = self.last_zero_pos[2] - kin_pos[2]
++            self.total_expansion += z_diff
++            logging.info(
++                "Estimated Total Thermal Expansion: %.6f"
++                % (self.total_expansion,)
++            )
++        self.last_zero_pos = kin_pos
++        toolhead = self.printer.lookup_object("toolhead")
++        tool_zero_z = toolhead.get_position()[2]
++        try:
++            last_temp = self._collect_sample(kin_pos, tool_zero_z)
++        except Exception:
++            self._finalize_drift_cal(False)
++            raise
++        self.sample_count += 1
++        if last_temp >= self.target_temp:
++            # Calibration Done
++            self._finalize_drift_cal(True)
++        else:
++            try:
++                self._prepare_next_sample(last_temp, tool_zero_z)
++            except Exception:
++                self._finalize_drift_cal(False)
++                raise
++
++    def _finalize_drift_cal(self, success, msg=None):
++        self.next_auto_temp = 99999999.
++        self.target_temp = 0
++        self.expected_count = 0
++        self.sample_count = 0
++        self.step = 2.
++        self.in_calibration = False
++        self.last_zero_pos = None
++        self.total_expansion = 0
++        self.start_pos = []
++        # Unregister Temporary Commands
++        self.gcode.register_command("ABORT", None)
++        self.gcode.register_command("PROBE_DRIFT_NEXT", None)
++        self.gcode.register_command("PROBE_DRIFT_COMPLETE", None)
++        try:
++            self.cal_helper.finish_calibration(success)
++        except self.gcode.error as e:
++            success = False
++            msg = str(e)
++        if not success:
++            msg = msg or "%s: calibration aborted" % (self.name,)
++            self.gcode.respond_info(msg)
++
++    def _get_probe(self):
++        probe = self.printer.lookup_object("probe")
++        if probe is None:
++            raise self.gcode.error("No probe configured")
++        return probe
++
++    cmd_PROBE_DRIFT_CALIBRATE_help = (
++        "Calibrate probe temperature drift compensation"
++    )
++    def cmd_PROBE_DRIFT_CALIBRATE(self, gcmd):
++        if self.cal_helper is None:
++            raise gcmd.error(
++                "No calibration helper registered for [%s]"
++                % (self.name,)
++            )
++        probe = self._get_probe()
++        probe_name = probe.get_probe_name().split(maxsplit=1)[-1]
++        short_name = self.name.split(maxsplit=1)[-1]
++        if probe_name != short_name:
++            raise self.gcode.error(
++                "[%s] not linked to registered probe [%s]."
++                % (self.name, probe.get_probe_name())
++            )
++        manual_probe.verify_no_manual_probe(self.printer)
++        if self.in_calibration:
++            raise gcmd.error(
++                "Already in probe drift calibration. Use "
++                "PROBE_DRIFT_COMPLETE or ABORT to exit."
++            )
++        cur_temp = self.smoothed_temp
++        target_temp = gcmd.get_float("TARGET", above=cur_temp)
++        step = gcmd.get_float("STEP", 2., minval=1.0)
++        expected_count = int(
++            (target_temp - cur_temp) / self.step + .5
++        )
++        if expected_count < 3:
++            raise gcmd.error(
++                "Invalid STEP and/or TARGET parameters resulted "
++                "in too few expected samples: %d"
++                % (expected_count,)
++            )
++        try:
++            self.gcode.register_command(
++                "PROBE_DRIFT_NEXT", self.cmd_PROBE_DRIFT_NEXT,
++                desc=self.cmd_PROBE_DRIFT_NEXT_help
++            )
++            self.gcode.register_command(
++                "PROBE_DRIFT_COMPLETE", self.cmd_PROBE_DRIFT_COMPLETE,
++                desc=self.cmd_PROBE_DRIFT_NEXT_help
++            )
++        except self.printer.config_error:
++            raise gcmd.error(
++                "Auxiliary Probe Drift Commands already registered. Use "
++                "PROBE_DRIFT_COMPLETE or ABORT to exit."
++            )
++        self.in_calibration = True
++        self.cal_helper.start_calibration()
++        self.target_temp = target_temp
++        self.step = step
++        self.sample_count = 0
++        self.expected_count = expected_count
++        # Caputure start position and begin initial probe
++        toolhead = self.printer.lookup_object("toolhead")
++        self.start_pos = toolhead.get_position()[:2]
++        self.lift_speed = probe.get_lift_speed(gcmd)
++        self.probe_speed = probe.get_probe_speed(gcmd)
++        manual_probe.ManualProbeHelper(
++            self.printer, gcmd, self._manual_probe_finalize
++        )
++
++    cmd_PROBE_DRIFT_NEXT_help = "Sample next probe drift temperature"
++    def cmd_PROBE_DRIFT_NEXT(self, gcmd):
++        manual_probe.verify_no_manual_probe(self.printer)
++        self.next_auto_temp = 99999999.
++        toolhead = self.printer.lookup_object("toolhead")
++        # Lift and Move to nozzle back to start position
++        curpos = toolhead.get_position()
++        start_z = curpos[2]
++        move_speed = self.speed or self.probe_speed
++        # Move nozzle to the manual probing position
++        curpos[2] += self.horizontal_move_z
++        toolhead.manual_move(curpos, self.lift_speed)
++        curpos[0] = self.start_pos[0]
++        curpos[1] = self.start_pos[1]
++        toolhead.manual_move(curpos, move_speed)
++        curpos[2] = start_z
++        toolhead.manual_move(curpos, self.probe_speed)
++        self.gcode.register_command("ABORT", None)
++        manual_probe.ManualProbeHelper(
++            self.printer, gcmd, self._manual_probe_finalize
++        )
++
++    cmd_PROBE_DRIFT_COMPLETE_help = "Finish Probe Drift Calibration"
++    def cmd_PROBE_DRIFT_COMPLETE(self, gcmd):
++        manual_probe.verify_no_manual_probe(self.printer)
++        self._finalize_drift_cal(self.sample_count >= 3)
++
++    cmd_PROBE_DRIFT_ABORT_help = "Abort Probe Drift Calibration"
++    def cmd_PROBE_DRIFT_ABORT(self, gcmd):
++        self._finalize_drift_cal(False)
++
++    def is_in_calibration(self):
++        return self.in_calibration
++
++    def get_status(self, eventtime=None):
++        return {
++            "temperature": self.smoothed_temp,
++            "measured_min_temp": round(self.measured_min, 2),
++            "measured_max_temp": round(self.measured_max, 2),
++            "in_calibration": self.in_calibration,
++            "estimated_expansion": self.total_expansion
++        }
++
++    def stats(self, eventtime):
++        return False, '%s: temp=%.1f' % (self.name, self.smoothed_temp)
++
++
++def load_config_prefix(config):
++    return TemperatureProbe(config)
+diff --git a/scripts/graph-mesh.py b/scripts/graph-mesh.py
+new file mode 100755
+index 000000000..cf66935e3
+--- /dev/null
++++ b/scripts/graph-mesh.py
+@@ -0,0 +1,398 @@
++#!/usr/bin/env python3
++# Bed Mesh data plotting and analysis
++#
++# Copyright (C) 2024 Eric Callahan <arksine.code@gmail.com>
++#
++# This file may be distributed under the terms of the GNU GPLv3 license.
++import argparse
++import json
++import collections
++import numpy as np
++import matplotlib
++import matplotlib.cm as cm
++import matplotlib.pyplot as plt
++import matplotlib.animation as ani
++
++class PathAnimation:
++    instance = None
++    def __init__(self, artist, x_travel, y_travel):
++        self.travel_artist = artist
++        self.x_travel = x_travel
++        self.y_travel = y_travel
++        fig = plt.gcf()
++        self.animation = ani.FuncAnimation(
++            fig=fig, func=self.update, frames=self.gen_path_position(),
++            cache_frame_data=False, interval=60
++        )
++        PathAnimation.instance = self
++
++    def gen_path_position(self):
++        count = 1
++        x_travel, y_travel = self.x_travel, self.y_travel
++        last_x, last_y = x_travel[0], y_travel[0]
++        yield count
++        for xpos, ypos in zip(x_travel[1:], y_travel[1:]):
++            count += 1
++            if xpos == last_x or ypos == last_y:
++                yield count
++            last_x, last_y = xpos, ypos
++
++    def update(self, frame):
++        x_travel, y_travel = self.x_travel, self.y_travel
++        self.travel_artist.set_xdata(x_travel[:frame])
++        self.travel_artist.set_ydata(y_travel[:frame])
++        return (self.travel_artist,)
++
++
++def _gen_mesh_coords(min_c, max_c, count):
++    dist = (max_c - min_c) / (count - 1)
++    return [min_c + i * dist for i in range(count)]
++
++def _plot_path(travel_path, probed, diff, cmd_args):
++    x_travel, y_travel = np.array(travel_path).transpose()
++    x_probed, y_probed = np.array(probed).transpose()
++    plt.xlabel("X")
++    plt.ylabel("Y")
++    # plot travel
++    travel_line = plt.plot(x_travel, y_travel, "b-")[0]
++    # plot intermediate points
++    plt.plot(x_probed, y_probed, "k.")
++    # plot start point
++    plt.plot([x_travel[0]], [y_travel[0]], "g>")
++    # plot stop point
++    plt.plot([x_travel[-1]], [y_travel[-1]], "r*")
++    if diff:
++        diff_x, diff_y = np.array(diff).transpose()
++        plt.plot(diff_x, diff_y, "m.")
++    if cmd_args.animate and cmd_args.output is None:
++        PathAnimation(travel_line, x_travel, y_travel)
++
++def _format_mesh_data(matrix, params):
++    min_pt = (params["min_x"], params["min_y"])
++    max_pt = (params["max_x"], params["max_y"])
++    xvals = _gen_mesh_coords(min_pt[0], max_pt[0], len(matrix[0]))
++    yvals = _gen_mesh_coords(min_pt[1], max_pt[0], len(matrix))
++    x, y = np.meshgrid(xvals, yvals)
++    z = np.array(matrix)
++    return x, y, z
++
++def _set_xy_limits(mesh_data, cmd_args):
++    if not cmd_args.scale_plot:
++        return
++    ax = plt.gca()
++    axis_min = mesh_data["axis_minimum"]
++    axis_max = mesh_data["axis_maximum"]
++    ax.set_xlim((axis_min[0], axis_max[0]))
++    ax.set_ylim((axis_min[1], axis_max[1]))
++
++def _plot_mesh(ax, matrix, params, cmap=cm.viridis, label=None):
++    x, y, z = _format_mesh_data(matrix, params)
++    surface = ax.plot_surface(x, y, z, cmap=cmap, label=label)
++    scale = max(abs(z.min()), abs(z.max())) * 3
++    return surface, scale
++
++def plot_probe_points(mesh_data, cmd_args):
++    """Plot original generated points"""
++    calibration = mesh_data["calibration"]
++    x, y = np.array(calibration["points"]).transpose()
++    plt.title("Generated Probe Points")
++    plt.xlabel("X")
++    plt.ylabel("Y")
++    plt.plot(x, y, "b.")
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_probe_path(mesh_data, cmd_args):
++    """Plot probe travel path"""
++    calibration = mesh_data["calibration"]
++    orig_pts = calibration["points"]
++    path_pts = calibration["probe_path"]
++    diff = [pt for pt in orig_pts if pt not in path_pts]
++    plt.title("Probe Travel Path")
++    _plot_path(path_pts, path_pts[1:-1], diff, cmd_args)
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_rapid_path(mesh_data, cmd_args):
++    """Plot rapid scan travel path"""
++    calibration = mesh_data["calibration"]
++    orig_pts = calibration["points"]
++    rapid_pts = calibration["rapid_path"]
++    rapid_path = [pt[0] for pt in rapid_pts]
++    probed = [pt for pt, is_ppt in rapid_pts if is_ppt]
++    diff = [pt for pt in orig_pts if pt not in probed]
++    plt.title("Rapid Scan Travel Path")
++    _plot_path(rapid_path, probed, diff, cmd_args)
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_probed_matrix(mesh_data, cmd_args):
++    """Plot probed Z values"""
++    ax = plt.subplot(projection="3d")
++    profile = cmd_args.profile_name
++    if profile is not None:
++        req_mesh = mesh_data["profiles"].get(profile)
++        if req_mesh is None:
++            raise Exception("Profile %s not found" % (profile,))
++        matrix = req_mesh["points"]
++        name = profile
++    else:
++        req_mesh = mesh_data["current_mesh"]
++        if not req_mesh:
++            raise Exception("No current mesh data in dump")
++        matrix = req_mesh["probed_matrix"]
++        name = req_mesh["name"]
++    params = req_mesh["mesh_params"]
++    surface, scale = _plot_mesh(ax, matrix, params)
++    ax.set_title("Probed Mesh (%s)" % (name,))
++    ax.set(zlim=(-scale, scale))
++    plt.gcf().colorbar(surface, shrink=.75)
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_mesh_matrix(mesh_data, cmd_args):
++    """Plot mesh Z values"""
++    ax = plt.subplot(projection="3d")
++    req_mesh = mesh_data["current_mesh"]
++    if not req_mesh:
++        raise Exception("No current mesh data in dump")
++    matrix = req_mesh["mesh_matrix"]
++    params = req_mesh["mesh_params"]
++    surface, scale = _plot_mesh(ax, matrix, params)
++    name = req_mesh["name"]
++    ax.set_title("Interpolated Mesh (%s)" % (name,))
++    ax.set(zlim=(-scale, scale))
++    plt.gcf().colorbar(surface, shrink=.75)
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_overlay(mesh_data, cmd_args):
++    """Plots the current probed mesh overlaid with a profile"""
++    ax = plt.subplot(projection="3d")
++    # Plot Profile
++    profile = cmd_args.profile_name
++    if profile is None:
++        raise Exception("A profile must be specified to plot an overlay")
++    req_mesh = mesh_data["profiles"].get(profile)
++    if req_mesh is None:
++        raise Exception("Profile %s not found" % (profile,))
++    matrix = req_mesh["points"]
++    params = req_mesh["mesh_params"]
++    prof_surf, prof_scale = _plot_mesh(ax, matrix, params, label=profile)
++    # Plot Current
++    req_mesh = mesh_data["current_mesh"]
++    if not req_mesh:
++        raise Exception("No current mesh data in dump")
++    matrix = req_mesh["probed_matrix"]
++    params = req_mesh["mesh_params"]
++    cur_name = req_mesh["name"]
++    cur_surf, cur_scale = _plot_mesh(ax, matrix, params, cm.inferno, cur_name)
++    ax.set_title("Probed Mesh Overlay")
++    scale = max(cur_scale, prof_scale)
++    ax.set(zlim=(-scale, scale))
++    ax.legend(loc='best')
++    plt.gcf().colorbar(prof_surf, shrink=.75)
++    _set_xy_limits(mesh_data, cmd_args)
++
++def plot_delta(mesh_data, cmd_args):
++    """Plots the delta between current probed mesh and a profile"""
++    ax = plt.subplot(projection="3d")
++    # Plot Profile
++    profile = cmd_args.profile_name
++    if profile is None:
++        raise Exception("A profile must be specified to plot an overlay")
++    req_mesh = mesh_data["profiles"].get(profile)
++    if req_mesh is None:
++        raise Exception("Profile %s not found" % (profile,))
++    prof_matix = req_mesh["points"]
++    prof_params = req_mesh["mesh_params"]
++    req_mesh = mesh_data["current_mesh"]
++    if not req_mesh:
++        raise Exception("No current mesh data in dump")
++    cur_matrix = req_mesh["probed_matrix"]
++    cur_params = req_mesh["mesh_params"]
++    cur_name = req_mesh["name"]
++    # validate that the params match
++    pfields = ("x_count", "y_count", "min_x", "max_x", "min_y", "max_y")
++    for field in pfields:
++        if abs(prof_params[field] - cur_params[field]) >= 1e-6:
++            raise Exception(
++                "Values for field %s do not match, cant plot deviation"
++            )
++    delta = np.array(cur_matrix) - np.array(prof_matix)
++    surface, scale = _plot_mesh(ax, delta, cur_params)
++    ax.set(zlim=(-scale, scale))
++    ax.set_title("Probed Mesh Delta (%s, %s)" % (cur_name, profile))
++    _set_xy_limits(mesh_data, cmd_args)
++
++
++PLOT_TYPES = {
++    "points": plot_probe_points,
++    "path": plot_probe_path,
++    "rapid": plot_rapid_path,
++    "probedz": plot_probed_matrix,
++    "meshz": plot_mesh_matrix,
++    "overlay": plot_overlay,
++    "delta": plot_delta,
++}
++
++def print_types(cmd_args):
++    typelist = [
++        "%-10s%s" % (name, func.__doc__) for name, func in PLOT_TYPES.items()
++    ]
++    print("\n".join(typelist))
++
++def plot_mesh_data(cmd_args):
++    with open(cmd_args.input_file, "r") as f:
++        mesh_data = json.load(f)
++
++    if cmd_args.output is not None:
++        matplotlib.use("svg")
++
++    fig = plt.figure()
++    plot_func = PLOT_TYPES[cmd_args.type]
++    plot_func(mesh_data, cmd_args)
++    fig.set_size_inches(10, 8)
++    fig.tight_layout()
++    if cmd_args.output is None:
++        plt.show()
++    else:
++        fig.savefig(cmd_args.output)
++
++def _check_path_unique(name, path):
++    path = np.array(path)
++    unique_pts, counts = np.unique(path, return_counts=True, axis=0)
++    for idx, count in enumerate(counts):
++        if count != 1:
++            coord = unique_pts[idx]
++            print(
++                "  WARNING: Backtracking or duplicate found in %s path at %s, "
++                "this may be due to multiple samples in a faulty region."
++                % (name, coord)
++            )
++
++def _analyze_mesh(name, mesh_axes):
++    print("\nAnalyzing Probed Mesh %s..." % (name,))
++    x, y, z = mesh_axes
++    min_idx, max_idx = z.argmin(), z.argmax()
++    min_x, min_y = x.flatten()[min_idx], y.flatten()[min_idx]
++    max_x, max_y = x.flatten()[max_idx], y.flatten()[max_idx]
++
++    print(
++        "  Min Coord (%.2f, %.2f), Max Coord (%.2f, %.2f), "
++        "Probe Count: (%d, %d)" %
++        (x.min(), y.min(), x.max(), y.max(), len(z), len(z[0]))
++    )
++    print(
++        "  Mesh range: min %.4f (%.2f, %.2f), max %.4f (%.2f, %.2f)"
++        % (z.min(), min_x, min_y, z.max(), max_x, max_y)
++    )
++    print("  Mean: %.4f, Standard Deviation: %.4f" % (z.mean(), z.std()))
++
++def _compare_mesh(name_a, name_b, mesh_a, mesh_b):
++    ax, ay, az = mesh_a
++    bx, by, bz = mesh_b
++    if not np.array_equal(ax, bx) or not np.array_equal(ay, by):
++        return
++    delta = az - bz
++    abs_max = max(abs(delta.max()), abs(delta.min()))
++    abs_mean = sum([abs(z) for z in delta.flatten()]) / len(delta.flatten())
++    min_idx, max_idx = delta.argmin(), delta.argmax()
++    min_x, min_y = ax.flatten()[min_idx], ay.flatten()[min_idx]
++    max_x, max_y = ax.flatten()[max_idx], ay.flatten()[max_idx]
++    print("  Delta from %s to %s..." % (name_a, name_b))
++    print(
++        "    Range: min %.4f (%.2f, %.2f), max %.4f (%.2f, %.2f)\n"
++        "    Mean: %.6f, Standard Deviation: %.6f\n"
++        "    Absolute Max: %.6f, Absolute Mean: %.6f"
++        % (delta.min(), min_x, min_y, delta.max(), max_x, max_y,
++           delta.mean(), delta.std(), abs_max, abs_mean)
++    )
++
++def analyze(cmd_args):
++    with open(cmd_args.input_file, "r") as f:
++        mesh_data = json.load(f)
++    print("Analyzing Travel Path...")
++    calibration = mesh_data["calibration"]
++    org_pts = calibration["points"]
++    probe_path = calibration["probe_path"]
++    rapid_path = calibration["rapid_path"]
++    rapid_points = [pt for pt, is_pt in rapid_path if is_pt]
++    rapid_moves = [pt[0] for pt in rapid_path]
++    print("  Original point count: %d" % (len(org_pts)))
++    print("  Probe path count: %d" % (len(probe_path)))
++    print("  Rapid scan sample count: %d" % (len(probe_path)))
++    print("  Rapid scan move count: %d" % (len(rapid_moves)))
++    if np.array_equal(rapid_points, probe_path):
++        print("  Rapid scan points match probe path points")
++    else:
++        diff = [pt for pt in rapid_points if pt not in probe_path]
++        print(
++            "  ERROR: Rapid scan points do not match probe points\n"
++            "difference: %s" % (diff,)
++        )
++    _check_path_unique("probe", probe_path)
++    _check_path_unique("rapid scan", rapid_moves)
++    req_mesh = mesh_data["current_mesh"]
++    formatted_data = collections.OrderedDict()
++    if req_mesh:
++        matrix = req_mesh["probed_matrix"]
++        params = req_mesh["mesh_params"]
++        name = req_mesh["name"]
++        formatted_data[name] = _format_mesh_data(matrix, params)
++    profiles = mesh_data["profiles"]
++    for prof_name, prof_data in profiles.items():
++        if prof_name in formatted_data:
++            continue
++        matrix = prof_data["points"]
++        params = prof_data["mesh_params"]
++        formatted_data[prof_name] = _format_mesh_data(matrix, params)
++    while formatted_data:
++        name, current_axes = formatted_data.popitem()
++        _analyze_mesh(name, current_axes)
++        for prof_name, prof_axes in formatted_data.items():
++            _compare_mesh(name, prof_name, current_axes, prof_axes)
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Graph Bed Mesh Data")
++    sub_parsers = parser.add_subparsers()
++    list_parser = sub_parsers.add_parser(
++        "list", help="List available plot types"
++    )
++    list_parser.set_defaults(func=print_types)
++    plot_parser = sub_parsers.add_parser("plot", help="Plot a specified type")
++    analyze_parser = sub_parsers.add_parser(
++        "analyze", help="Perform analysis on mesh data"
++    )
++    plot_parser.add_argument(
++        "-a", "--animate", action="store_true",
++        help="Animate paths in live preview"
++    )
++    plot_parser.add_argument(
++        "-s", "--scale-plot", action="store_true",
++        help="Use axis limits reported by Klipper to scale plot X/Y"
++    )
++    plot_parser.add_argument(
++        "-p", "--profile-name", type=str, default=None,
++        help="Optional name of a profile to plot for 'probedz'"
++    )
++    plot_parser.add_argument(
++        "-o", "--output", type=str, default=None,
++        help="Output file path"
++    )
++    plot_parser.add_argument(
++        "type", metavar="<plot type>", type=str, choices=PLOT_TYPES.keys(),
++        help="Type of data to graph"
++    )
++    plot_parser.add_argument(
++        "input_file", metavar="<input file>",
++        help="Path to file containing mesh dump"
++    )
++    plot_parser.set_defaults(func=plot_mesh_data)
++    analyze_parser.add_argument(
++        "input_file", metavar="<input file>",
++        help="Path to file containing mesh dump"
++    )
++    analyze_parser.set_defaults(func=analyze)
++    cmd_args = parser.parse_args()
++    cmd_args.func(cmd_args)
++
++
++if __name__ == "__main__":
++    main()
