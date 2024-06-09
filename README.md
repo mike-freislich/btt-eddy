@@ -166,8 +166,10 @@ echo "G1 X135 Y135 Z1 F6000" >~/printer_data/comms/klippy.serial # this is rough
 - Print a simple single layer (0.25mm) square with a 5 loop skirt 
 - Measure the height of the skirt with some precise calipers. If the height is for example 0.29mm then the z is too high by 0.04mm. So we need to subtract that from the configured z=0.
 - With a stable temp bed (cold or any other consistent temperature):
--- G28
--- PAPER_TEST
+```
+G28
+PAPER_TEST
+```
 - *** DO NOT USE PAPER ***
 - In this example we’re 0.04mm too high, so:
 -- Our starting offset is 10mm
@@ -175,7 +177,7 @@ echo "G1 X135 Y135 Z1 F6000" >~/printer_data/comms/klippy.serial # this is rough
 -- Then lower in 1mm increments until we’re at -0.04mm
 - Accept
 - Now the eddy moves over the probe point and does some bounciness to calibrate z-frequencies for that z-height
-- SAVE_CONFIG
+- `SAVE_CONFIG`
 
 ### 8. CAUTION
 
