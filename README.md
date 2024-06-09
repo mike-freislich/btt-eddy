@@ -170,11 +170,11 @@ echo "G1 X135 Y135 Z1 F6000" >~/printer_data/comms/klippy.serial # this is rough
 G28
 PAPER_TEST
 ```
-- *** DO NOT USE PAPER ***
+- **DO NOT USE PAPER**
 - In this example we’re 0.04mm too high, so:
--- Our starting offset is 10mm
--- Lower the nozzle by 0.04mm
--- Then lower in 1mm increments until we’re at -0.04mm
+    - Our starting offset is 10mm
+    - Lower the nozzle by 0.04mm
+    - Then lower in 1mm increments until we’re at -0.04mm
 - Accept
 - Now the eddy moves over the probe point and does some bounciness to calibrate z-frequencies for that z-height
 - `SAVE_CONFIG`
