@@ -26,25 +26,25 @@ Setup Overview
 Setup Details
 
 1. Design and print an Eddy Mount if required for your setup
-* Just do it … I made my own for my Micro Swiss NG extruder
+- Just do it … I made my own for my Micro Swiss NG extruder
 
 2. Connect Eddy
-* Connect to a well-powered USB port - I’m using an externally powered USB hub.
+- Connect to a well-powered USB port - I’m using an externally powered USB hub.
 
 3. Update and Patch the main Klipper to support Eddy
-* Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper > v205
-* Download the “eddy.patch” file to your klipper host:
-    * I put this in my klipper user’s ~/patch directory.
-* Install the patch:
-    * ~/Klipper/patch -p1 < ~/patch/eddy.patch
-* Restart Klipper
-* Flash the Eddy and any MCU boards.
+- Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper > v205
+- Download the “eddy.patch” file to your klipper host:
+-- I put this in my klipper user’s ~/patch directory.
+- Install the patch:
+-- ~/Klipper/patch -p1 < ~/patch/eddy.patch
+- Restart Klipper
+- Flash the Eddy and any MCU boards.
 
 4. Configure Klipper (printer.cfg) for Eddy support.
 
-* In “printer.cfg” :
-    * Remove your existing bltouch or similar config
-    * Add the following:
+- In “printer.cfg” :
+-- Remove your existing bltouch or similar config
+-- Add the following:
 
 [mcu eddy]
 serial: /dev/serial/by-id/usb-Klipper_rp2040_45474E621A8BE41A-if00 # EDDY <— replace this with your actual eddy serial device
