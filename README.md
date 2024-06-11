@@ -30,7 +30,7 @@
 - Connect to a well-powered USB port - I’m using an externally powered USB hub.
 
 ### 3. Update and Patch the main Klipper to support Eddy
-- Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper > v205
+- Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper >= v205  and <= v208 (**!! there is a breaking change in v209 !!**)
 - Download the “eddy.patch” file to your klipper host:
 -- I put this in my klipper user’s ~/patch directory.
 - Install the patch:
