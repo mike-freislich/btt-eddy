@@ -34,7 +34,10 @@
 - Download the “eddy.patch” file to your klipper host:
 -- I put this in my klipper user’s ~/patch directory.
 - Install the patch:
-    `~/Klipper/patch -p1 < ~/patch/eddy.patch`
+```
+cd ~/Klipper
+patch -p1 < ~/patch/eddy.patch
+```
 - Restart Klipper
 - Flash the Eddy and any MCU boards.
 
