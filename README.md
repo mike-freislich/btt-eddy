@@ -31,6 +31,7 @@
 
 ### 3. Update and Patch the main Klipper to support Eddy
 - Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper >= v205  and <= v208 (**!! there is a breaking change in v209 !!**)
+-- If you have already got v209 or greater, you can simply cd ~/klipper .... and run `git checkout 49c0ad6369670da574f550aa878ce9f6e1899e74`. This will get you onto v208
 - Download the “eddy.patch” file to your klipper host:
 -- I put this in my klipper user’s ~/patch directory.
 - Install the patch:
