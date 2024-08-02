@@ -13,7 +13,7 @@
 ## Setup Overview
 1. Design and print an Eddy Mount if required for your setup.
 2. Connect Eddy.
-3. Update and Patch the main Klipper to support Eddy.
+3. Update to latest Klipper to ensure BTT Eddy support.
 4. Configure Klipper (printer.cfg) for Eddy support.
 5. Setup initial Z - “eddy paper-test”
 6. Do thermal compensation calibration
@@ -29,18 +29,9 @@
 ### 2. Connect Eddy
 - Connect to a well-powered USB port - I’m using an externally powered USB hub.
 
-### 3. Update and Patch the main Klipper to support Eddy
-- Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper >= v205  and <= v208 (**!! there is a breaking change in v209 !!**)
--- If you have already got v209 or greater, you can simply cd ~/klipper .... and run `git checkout 49c0ad6369670da574f550aa878ce9f6e1899e74`. This will get you onto v208
-- Download the “eddy.patch” file to your klipper host:
--- I put this in my klipper user’s ~/patch directory.
-- Install the patch:
-```
-cd ~/Klipper
-patch -p1 < ~/patch/eddy.patch
-```
-- Restart Klipper
-- Flash the Eddy and any MCU boards.
+### 3. Update to the latest Klipper firmware
+- Perform the normal Mainsail/Fluid updates to make sure you’re on a current version of Klipper >= v0.12.0-272-g13c75ea8.
+- Flash your MCUs
 
 ### 4. Configure Klipper (printer.cfg) for Eddy support.
 
@@ -63,7 +54,7 @@ i2c_mcu: eddy
 i2c_bus: i2c0f
 x_offset: -40.949 	# Set actual offset relative to nozzle
 y_offset: -10.317 	# Set actual offset relative to nozzle
-data_rate: 500
+;data_rate: 500     # deprecated
 
 [temperature_probe btt_eddy]
 sensor_type: Generic 3950
@@ -86,7 +77,6 @@ speed: 100
 ```
 ; ------------------------------------ EDDY PROBE  MACROS ---------------------------------------------------------------------
 
-
 [gcode_macro nozzle_home_XY]
 description: moves the nozzle xy to reference bedscrew location
 gcode:
@@ -107,7 +97,11 @@ gcode:
 description: perform a bedmesh .. optional parameter “PROFILE” will default to “default”
 gcode:
   {% set profile = params.PROFILE|default("default") %}
-  BED_MESH_CALIBRATE METHOD=scan SCAN_MODE=rapid PROFILE={profile}
+  BED_MESH_CALIBRATE METHOD=rapid_scan PROFILE={profile}
+
+[gcode_macro eddy_probe_calibrate]
+gcode:
+  PROBE_EDDY_CURRENT_CALIBRATE chip=btt_eddy
 ```
 
 - Do a “FIRMWARE_RESTART”
@@ -129,10 +123,10 @@ PAPER_TEST
 
 ### 6. Do thermal compensation calibration
 
-This is a very manual process. We need to heat-soak the Eddy i.e. get the Eddy internal temperature as hot as it will go when the printer is at your highest-temperature printing environment. In my case I print ABS with a bed temp of 90C, with the nozzle anywhere between 250C - 280C.
+This is a very manual process. We need to heat-soak the Eddy i.e. get the Eddy internal temperature as hot as it will go when the printer is at your highest-temperature printing environment. In my case I print ABS with a bed temp of 100C, with the nozzle anywhere between 250C - 280C.
 - Start cold ….. and note what your “BTT Eddy” temperature is at e.g. 35C … note you don’t care about the “BTT Eddy Mcu” temperature, just the “BTT Eddy” temperature.
 - `SET_IDLE_TIMEOUT TIMEOUT=36000` in order to prevent the printer from inadvertantly bombing out of the test.
-- Start your bed heating to 100C or whatever the highest bed temp is
+- Start your bed heating to 100C or whatever the highest bed temp is that you use.
 - Start heating your nozzle to your highest printing temp e.g. 280C in my case.
 - Move the Eddy to the centre of the bed and set your nozzle Z height to around 1mm (we want that Eddy surrounded by heating pain!)
 - Wait until the “BTT Eddy” temp stabilizes - this will take some time. Mine got to around >70C, with my bed at 100C and enclosure closed. Make a note of this temperature as your Max Eddy Temperature
@@ -167,7 +161,7 @@ echo "G1 X135 Y135 Z1 F6000" >~/printer_data/comms/klippy.serial # this is rough
 
 
 ### 7. Set the true Z - by printing and measuring and adjusting the probe calibration (no paper)
-- Print a simple single layer (0.25mm) square with a 5 loop skirt 
+- Print a simple single layer (0.25mm height) square with a 5 loop skirt 
 - Measure the height of the skirt with some precise calipers. If the height is for example 0.29mm then the z is too high by 0.04mm. So we need to subtract that from the configured z=0.
 - With a stable temp bed (cold or any other consistent temperature):
 ```
@@ -188,16 +182,8 @@ PAPER_TEST
 - **BEWARE : Using different build plates or double-sided build plates**
     - Due to the physical layers on your build plate, there is often variance in the height of the PEI layer / textured PEI layer from one build plate to the next. These layers are non-conductive material which sit above the conductive steel. The eddy will ignore non-conductive material, so this physical difference will affect your build height. In this case, after all of your configuration on one plate (or side of a plate), you will have a reference plate for Z=0, which is now hard-stored in your printer.cfg file. To adjust the z height from one plate to the next, you will need to print and measure a skirt height to find out the variance in mm of your build plate surface. In my case there is a 0.2mm difference between my PEO surface and my textured PEI surface. Once you have that number, you can configure plate profiles in ORCA slicer, and detect the plate type in your start gcode in order to affect the z-offset accordingly : see Orca’s “working with multiple bed types” page here https://github.com/SoftFever/OrcaSlicer/wiki/bed-types#multiple-bed-types 
 - **BEWARE : Never again will you use bed-mesh from mainsail UI**
-    - From now on you will use the EDDY_MESH macro we added above. If you are using adaptive mesh, be sure to add the parameters: METHOD=scan SCAN_MODE=rapid 
+    - From now on you will use the EDDY_MESH macro we added above. If you are using adaptive mesh (recommended), be sure to add the parameters: METHOD=rapid_scan
 - **BEWARE : you cannot calibrate and save z height by using z-offset**
     - Once Z=0 is truly set… making changes to the z-offset and saving will have no effect. To change the Z-height you must use Probe_eddy_current_calibrate (see PAPER_TEST macro above).
+    - An alternative is to manipulate the z-offset in startup gcode e.g. https://github.com/SoftFever/OrcaSlicer/wiki/bed-types#multiple-bed-types.
     - You can still micro step during a print or in gcode, but z-offset changes won’t save. After the z-motors are disengaged, eddy uses frequency to discover z=0, not the z-offset.
-- **BEWARE: UPDATING KLIPPER in the future…**
-    - because we’re using a patched version of Klipper your updates will need to happen like this, until the code is officially merged into klipper main branch:
-```
-git stash
-do mainsail update stuff
-git stash pop
-klipper restart
-klipperscreen restart
-```
